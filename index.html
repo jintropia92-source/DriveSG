@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover" />
+  <meta name="theme-color" content="#091014" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="DriveSG" />
+  <meta name="format-detection" content="telephone=no" />
+  <title>DriveSG — Singapore, playable.</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <main id="app" aria-label="DriveSG">
+    <div id="game" aria-hidden="true"></div>
+
+    <div id="rotateGate" class="rotate-gate" role="status">
+      <div class="rotate-card">
+        <div class="phone-icon" aria-hidden="true"><span></span></div>
+        <strong>Rotate to landscape</strong>
+        <p>DriveSG is designed for two-thumb driving on iPhone.</p>
+      </div>
+    </div>
+
+    <header class="topbar">
+      <button id="placesBtn" class="place-pill" type="button" aria-label="Choose location">
+        <span class="live-dot" id="mapDot"></span>
+        <span class="place-copy"><small>DRIVING</small><strong id="locationName">Marina Bay</strong></span>
+        <span class="chevron">⌄</span>
+      </button>
+      <div class="top-actions">
+        <button id="resetBtn" class="round-action" type="button" aria-label="Reset car to road" title="Reset car">↻</button>
+      </div>
+    </header>
+
+    <aside id="placesPanel" class="places-panel open" aria-label="Choose where to drive">
+      <div class="panel-head">
+        <div>
+          <div class="eyebrow">DRIVESG</div>
+          <h1>Where do you want to drive?</h1>
+          <p>Pick a Singapore starting point. The road world refreshes around you as you keep driving.</p>
+        </div>
+        <button id="closePanelBtn" class="close-btn" type="button" aria-label="Close locations">×</button>
+      </div>
+
+      <div class="quick-row">
+        <button id="nearMeBtn" class="quick-btn" type="button"><span>◎</span><strong>Near me</strong></button>
+        <button id="randomBtn" class="quick-btn" type="button"><span>↝</span><strong>Random</strong></button>
+      </div>
+
+      <form id="searchForm" class="search-row" role="search">
+        <input id="searchInput" autocomplete="off" autocapitalize="words" enterkeyhint="search" inputmode="search" placeholder="Search Singapore, e.g. Bugis" aria-label="Search Singapore location" />
+        <button type="submit">Go</button>
+      </form>
+      <div id="searchMsg" class="search-msg" aria-live="polite"></div>
+
+      <div id="presetGrid" class="preset-grid"></div>
+
+      <div class="panel-foot">
+        <span class="status-dot"></span>
+        <span>Real roads from OpenStreetMap · Singapore only</span>
+      </div>
+    </aside>
+
+    <section class="drive-hud" aria-label="Driving information">
+      <div class="speed-readout"><span id="speed">0</span><small>km/h</small></div>
+      <div id="gear" class="gear">D</div>
+      <div id="surfaceState" class="surface-state">ON ROAD</div>
+    </section>
+
+    <div id="driveHint" class="drive-hint">Drag to steer&nbsp;&nbsp;·&nbsp;&nbsp;Hold GO to accelerate</div>
+
+    <section id="mobileControls" class="drive-controls" aria-label="Driving controls">
+      <div id="steerZone" class="steer-zone" aria-label="Steering pad">
+        <div class="steer-track"></div>
+        <div id="steerKnob" class="steer-knob"><span>‹</span><span>›</span></div>
+        <small>STEER</small>
+      </div>
+      <div class="pedals">
+        <button id="brakeBtn" class="pedal brake" type="button" aria-label="Brake or reverse"><span>BRAKE</span></button>
+        <button id="gasBtn" class="pedal gas" type="button" aria-label="Accelerate"><span>GO</span></button>
+      </div>
+    </section>
+
+    <div id="loader" class="loader-wrap">
+      <div class="loader-card">
+        <div class="loader-logo">SG</div>
+        <h2 id="loaderTitle">Building Singapore</h2>
+        <p id="loaderText">Preparing Marina Bay…</p>
+        <div class="progress-track"><div id="progressBar" class="progress-bar"></div></div>
+        <div class="progress-meta"><span id="progressLabel">0%</span><span>iPhone mode</span></div>
+      </div>
+    </div>
+
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+    <footer class="attribution">© OpenStreetMap contributors</footer>
+  </main>
+
+  <script src="boot.js"></script>
+</body>
+</html>
