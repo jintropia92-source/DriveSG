@@ -34,8 +34,12 @@
   const ROAD_QUERY = '^(motorway|motorway_link|trunk|trunk_link|primary|primary_link|secondary|secondary_link|tertiary|tertiary_link|residential|unclassified|living_street|service)$';
   const STREAM_TRIGGER_METERS = 430;
   const STREAM_RETRY_SECONDS = 13;
-  const ROAD_RADIUS_METERS = 1325;
-  const BUILDING_RADIUS_METERS = 560;
+  const ROAD_RADIUS_METERS = 1450;
+  const BUILDING_RADIUS_METERS = 720;
+  const SURFACE_RADIUS_METERS = 860;
+  const MAX_BUILDINGS = 950;
+  const SIGNAL_RADIUS_METERS = 900;
+  const MAX_TRAFFIC_SIGNALS = 140;
 
   let scene, camera, renderer, clock, sun, sunTarget, horizonHaze;
   let persistentWorld, dynamicWorld;
@@ -46,6 +50,8 @@
   let loadedCenterWorld = { x: 0, z: 0 };
   let roadSegments = [];
   let roadIndex = new Map();
+  let buildingColliders = [];
+  let buildingIndex = new Map();
   let spawnPose = { x: 0, z: 0, yaw: 0 };
   let speedMps = 0;
   let steeringVisual = 0;
@@ -177,17 +183,25 @@
   }
 
   function makeSharedMaterials() {
-    shared.road = new THREE.MeshStandardMaterial({ color: 0x30363a, roughness: 0.94, metalness: 0 });
-    shared.majorRoad = new THREE.MeshStandardMaterial({ color: 0x292f33, roughness: 0.93, metalness: 0 });
-    shared.line = new THREE.MeshBasicMaterial({ color: 0xe1dcc4, transparent: true, opacity: 0.75, depthWrite: false });
+    shared.roadEdge = new THREE.MeshStandardMaterial({ color: 0x8a8d86, roughness: 1, metalness: 0, side: THREE.DoubleSide });
+    shared.road = new THREE.MeshStandardMaterial({ color: 0x34393d, roughness: 0.96, metalness: 0, side: THREE.DoubleSide });
+    shared.majorRoad = new THREE.MeshStandardMaterial({ color: 0x292e32, roughness: 0.95, metalness: 0, side: THREE.DoubleSide });
+    shared.line = new THREE.MeshBasicMaterial({ color: 0xf0ead7, transparent: true, opacity: 0.86, depthWrite: false, side: THREE.DoubleSide });
+    shared.water = new THREE.MeshStandardMaterial({ color: 0x527d8d, roughness: 0.72, metalness: 0.03, transparent: true, opacity: 0.93, side: THREE.DoubleSide });
+    shared.park = new THREE.MeshStandardMaterial({ color: 0x688268, roughness: 1, metalness: 0, side: THREE.DoubleSide });
     shared.buildings = [
-      new THREE.MeshStandardMaterial({ color: 0xbcbeb9, roughness: 0.93 }),
-      new THREE.MeshStandardMaterial({ color: 0xc9c3b8, roughness: 0.93 }),
-      new THREE.MeshStandardMaterial({ color: 0xaeb3b4, roughness: 0.93 }),
-      new THREE.MeshStandardMaterial({ color: 0xd3d3cd, roughness: 0.93 })
+      new THREE.MeshStandardMaterial({ color: 0xc7c0b3, roughness: 0.90, side: THREE.DoubleSide }),
+      new THREE.MeshStandardMaterial({ color: 0xb9c3c7, roughness: 0.86, side: THREE.DoubleSide }),
+      new THREE.MeshStandardMaterial({ color: 0xa9adae, roughness: 0.94, side: THREE.DoubleSide }),
+      new THREE.MeshStandardMaterial({ color: 0xd0cdc4, roughness: 0.92, side: THREE.DoubleSide })
     ];
     shared.treeTrunk = new THREE.MeshStandardMaterial({ color: 0x625341, roughness: 1 });
     shared.treeLeaf = new THREE.MeshStandardMaterial({ color: 0x567459, roughness: 1 });
+    shared.signalPole = new THREE.MeshStandardMaterial({ color: 0x3d4142, roughness: .92 });
+    shared.signalHead = new THREE.MeshStandardMaterial({ color: 0x15191a, roughness: .82 });
+    shared.signalRed = new THREE.MeshStandardMaterial({ color: 0x8e2c2f, emissive: 0x250506, emissiveIntensity: .55, roughness: .65 });
+    shared.signalAmber = new THREE.MeshStandardMaterial({ color: 0xa98131, emissive: 0x211404, emissiveIntensity: .32, roughness: .65 });
+    shared.signalGreen = new THREE.MeshStandardMaterial({ color: 0x3d7c57, emissive: 0x061d0e, emissiveIntensity: .32, roughness: .65 });
   }
 
   function addHorizonHaze() {
@@ -278,10 +292,10 @@
       setProgress(16, 'Fetching nearby Singapore roads…');
       const data = await fetchOsmData(place.lat, place.lon);
       if (generation !== streamGeneration) return;
-      setProgress(52, 'Optimising the road world for iPhone…');
+      setProgress(52, 'Drawing real road and building geometry…');
       const built = buildWorld(data, { centerX: 0, centerZ: 0 });
       if (built.roadCount < 3) throw new Error('Not enough road geometry');
-      setProgress(83, 'Placing your car on the road…');
+      setProgress(86, `${built.roadCount} roads · ${built.buildingCount} building footprints`);
       swapDynamicWorld(built);
       loadedCenterWorld = { x: 0, z: 0 };
       placeCarNear(0, 0, true);
@@ -290,7 +304,7 @@
       setMapState('live');
       setTimeout(hideLoader, 220);
       if (!options.keepPanelOpen) closePanel();
-      showToast('Live Singapore roads loaded');
+      showToast(`${built.roadCount} roads · ${built.buildingCount} real buildings loaded`);
     } catch (err) {
       console.warn('Live road data unavailable. Falling back to bundled Marina Bay demo.', err);
       if (generation !== streamGeneration) return;
@@ -314,15 +328,20 @@
     const cacheKey = `${lat.toFixed(4)},${lon.toFixed(4)}`;
     if (mapCache.has(cacheKey)) return mapCache.get(cacheKey);
 
-    const query = `[out:json][timeout:22];(
+    const query = `[out:json][timeout:24];(
       way["highway"~"${ROAD_QUERY}"](around:${ROAD_RADIUS_METERS},${lat},${lon});
       way["building"](around:${BUILDING_RADIUS_METERS},${lat},${lon});
+      way["natural"="water"](around:${SURFACE_RADIUS_METERS},${lat},${lon});
+      way["waterway"="riverbank"](around:${SURFACE_RADIUS_METERS},${lat},${lon});
+      way["leisure"="park"](around:${SURFACE_RADIUS_METERS},${lat},${lon});
+      way["landuse"~"^(grass|recreation_ground|meadow)$"](around:${SURFACE_RADIUS_METERS},${lat},${lon});
+      node["highway"="traffic_signals"](around:${SIGNAL_RADIUS_METERS},${lat},${lon});
     );out geom;`;
 
     let lastError;
     for (const endpoint of OVERPASS_ENDPOINTS) {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 18000);
+      const timeoutId = setTimeout(() => controller.abort(), 21000);
       try {
         const res = await fetch(endpoint, {
           method: 'POST',
@@ -367,75 +386,276 @@
     const normalizedCenter = { x: centerX, z: centerZ };
     const group = new THREE.Group();
     const segments = [];
+    const edgeVerts = [];
     const roadVerts = [];
     const majorVerts = [];
     const lineVerts = [];
-    const buildings = [[], [], [], []];
+    const waterVerts = [];
+    const parkVerts = [];
+    const buildingVerts = [[], [], [], []];
+    const buildingDescriptors = [];
+    const signalPoints = [];
     let roadCount = 0;
+    let waterCount = 0;
+    let parkCount = 0;
 
     for (const el of data.elements) {
+      const tags = el.tags || {};
+      if (el.type==='node' && tags.highway==='traffic_signals' && Number.isFinite(el.lat) && Number.isFinite(el.lon)) {
+        const p=project(el.lat,el.lon);
+        if(Math.hypot(p.x-centerX,p.z-centerZ)<=SIGNAL_RADIUS_METERS+80 && signalPoints.length<MAX_TRAFFIC_SIGNALS) signalPoints.push(p);
+        continue;
+      }
       if (!Array.isArray(el.geometry) || el.geometry.length < 2) continue;
-      if (el.tags?.highway) {
-        const type = el.tags.highway;
-        const width = widthForRoad(el.tags);
+
+      if (tags.highway) {
+        const type = tags.highway;
+        const width = widthForRoad(tags);
         const major = isMajorRoad(type);
-        const points = el.geometry.map(p => project(p.lat, p.lon));
+        const points = cleanPolyline(el.geometry.map(p => project(p.lat, p.lon)));
+        if (points.length < 2) continue;
+
+        // A slightly wider neutral strip underneath creates continuous road edges / curbs
+        // and hides small gaps where OSM ways meet at junctions.
+        appendRoadRibbon(edgeVerts, points, width + (major ? 1.6 : 2.1), 0.016, true);
+        appendRoadRibbon(major ? majorVerts : roadVerts, points, width, 0.030, true);
+
+        const lanes = laneCountForRoad(tags);
+        const waySegments = [];
         for (let i = 0; i < points.length - 1; i++) {
           const a = points[i], b = points[i + 1];
           const dx = b.x - a.x, dz = b.z - a.z;
           const length = Math.hypot(dx, dz);
           if (length < .6 || length > 1500) continue;
           const seg = {
-            ax:a.x, az:a.z, bx:b.x, bz:b.z, width, major,
-            oneway: el.tags?.oneway || '',
-            name: roadDisplayName(el.tags)
+            ax:a.x, az:a.z, bx:b.x, bz:b.z, width, major, lanes,
+            oneway: tags.oneway || '',
+            name: roadDisplayName(tags)
           };
           segments.push(seg);
-          appendRoadQuad(major ? majorVerts : roadVerts, seg, 0.025);
-          if (major && length > 16) appendCenterDashes(lineVerts, seg);
+          waySegments.push(seg);
         }
+        appendWayLaneMarkings(lineVerts, waySegments, width, lanes, tags.oneway || '');
         roadCount++;
-      } else if (el.tags?.building) {
+      } else if (tags.building) {
         const b = buildingDescriptor(el, normalizedCenter);
-        if (b) buildings[b.bucket].push(b);
+        if (b) buildingDescriptors.push(b);
+      } else if (isWaterFeature(tags)) {
+        const pts = cleanPolygon(el.geometry.map(p => project(p.lat, p.lon)));
+        if (appendFlatPolygon(waterVerts, pts, 0.004)) waterCount++;
+      } else if (isParkFeature(tags)) {
+        const pts = cleanPolygon(el.geometry.map(p => project(p.lat, p.lon)));
+        if (appendFlatPolygon(parkVerts, pts, -0.002)) parkCount++;
       }
     }
 
+    if (edgeVerts.length) group.add(meshFromFlatVertices(edgeVerts, shared.roadEdge, true));
     if (roadVerts.length) group.add(meshFromFlatVertices(roadVerts, shared.road, true));
     if (majorVerts.length) group.add(meshFromFlatVertices(majorVerts, shared.majorRoad, true));
     if (lineVerts.length) {
       const lines = meshFromFlatVertices(lineVerts, shared.line, false);
-      lines.renderOrder = 3;
+      lines.renderOrder = 4;
       group.add(lines);
     }
+    if (waterVerts.length) {
+      const water = meshFromFlatVertices(waterVerts, shared.water, false);
+      water.renderOrder = 1;
+      group.add(water);
+    }
+    if (parkVerts.length) {
+      const parks = meshFromFlatVertices(parkVerts, shared.park, false);
+      parks.renderOrder = 1;
+      group.add(parks);
+    }
 
-    const boxGeo = new THREE.BoxGeometry(1, 1, 1);
-    buildings.forEach((list, bucket) => {
-      if (!list.length) return;
-      const instanced = new THREE.InstancedMesh(boxGeo, shared.buildings[bucket], list.length);
-      instanced.receiveShadow = true;
-      instanced.castShadow = false;
-      instanced.instanceMatrix.setUsage(THREE.StaticDrawUsage);
-      const matrix = new THREE.Matrix4();
-      const pos = new THREE.Vector3();
-      const quat = new THREE.Quaternion();
-      const scale = new THREE.Vector3();
-      list.forEach((b, i) => {
-        pos.set(b.x, b.h/2, b.z);
-        scale.set(b.w, b.h, b.d);
-        matrix.compose(pos, quat, scale);
-        instanced.setMatrixAt(i, matrix);
-      });
-      instanced.instanceMatrix.needsUpdate = true;
-      group.add(instanced);
+    buildingDescriptors.sort((a,b) => a.distance - b.distance);
+    const selectedBuildings = buildingDescriptors.slice(0, MAX_BUILDINGS);
+    selectedBuildings.forEach(b => appendBuildingGeometry(buildingVerts[b.bucket], b));
+    buildingVerts.forEach((verts, bucket) => {
+      if (!verts.length) return;
+      const mesh = meshFromFlatVertices(verts, shared.buildings[bucket], true);
+      mesh.castShadow = false;
+      group.add(mesh);
     });
 
-    const treeCount = addRoadsideTrees(group, segments, centerX, centerZ);
-    addLandmarksTo(group, centerX, centerZ);
-    return { group, segments, roadCount, buildingCount: buildings.reduce((n,a)=>n+a.length,0), treeCount };
+    const trafficSignalCount = addTrafficSignals(group, signalPoints);
+    const treeCount = addRoadsideTrees(group, segments, centerX, centerZ, selectedBuildings);
+    return {
+      group, segments, roadCount,
+      buildingCount: selectedBuildings.length,
+      buildingColliders: selectedBuildings,
+      treeCount, waterCount, parkCount, trafficSignalCount
+    };
   }
 
-  function addRoadsideTrees(group, segments, centerX, centerZ) {
+  function cleanPolyline(points) {
+    const out=[];
+    for(const p of points){
+      const last=out[out.length-1];
+      if(!last || Math.hypot(p.x-last.x,p.z-last.z)>.18) out.push(p);
+    }
+    return out;
+  }
+
+  function cleanPolygon(points) {
+    const out=cleanPolyline(points);
+    if(out.length<4)return [];
+    const closure=Math.hypot(out[0].x-out[out.length-1].x,out[0].z-out[out.length-1].z);
+    if(closure>1.2)return [];
+    out.pop();
+    return out.length>=3 ? out : [];
+  }
+
+  function appendRoadRibbon(out, points, width, y, roundCaps=false) {
+    if(points.length<2)return;
+    const half=width/2;
+    const pairs=[];
+    for(let i=0;i<points.length;i++){
+      const p=points[i];
+      const prev=points[Math.max(0,i-1)], next=points[Math.min(points.length-1,i+1)];
+      let pDx=p.x-prev.x,pDz=p.z-prev.z,nDx=next.x-p.x,nDz=next.z-p.z;
+      let pLen=Math.hypot(pDx,pDz),nLen=Math.hypot(nDx,nDz);
+      if(pLen<.001){pDx=nDx;pDz=nDz;pLen=nLen||1;}
+      if(nLen<.001){nDx=pDx;nDz=pDz;nLen=pLen||1;}
+      pDx/=pLen;pDz/=pLen;nDx/=nLen;nDz/=nLen;
+      const pn={x:-pDz,z:pDx}, nn={x:-nDz,z:nDx};
+      let ox,oz;
+      if(i===0){ox=nn.x*half;oz=nn.z*half;}
+      else if(i===points.length-1){ox=pn.x*half;oz=pn.z*half;}
+      else{
+        let mx=pn.x+nn.x,mz=pn.z+nn.z;
+        const ml=Math.hypot(mx,mz);
+        if(ml<.08){mx=nn.x;mz=nn.z;}
+        else{mx/=ml;mz/=ml;}
+        const denom=mx*nn.x+mz*nn.z;
+        let miter=half/Math.max(.34,Math.abs(denom));
+        miter=Math.min(miter,half*2.15);
+        ox=mx*miter;oz=mz*miter;
+      }
+      pairs.push({l:[p.x+ox,y,p.z+oz],r:[p.x-ox,y,p.z-oz]});
+    }
+    for(let i=0;i<pairs.length-1;i++){
+      const a=pairs[i],b=pairs[i+1];
+      pushTri(out,a.l,a.r,b.r);pushTri(out,a.l,b.r,b.l);
+    }
+    if(roundCaps){
+      appendRoadCap(out,points[0],half,y);
+      appendRoadCap(out,points[points.length-1],half,y);
+    }
+  }
+
+  function appendRoadCap(out,p,r,y) {
+    const steps=8,c=[p.x,y,p.z];
+    for(let i=0;i<steps;i++){
+      const a=i*Math.PI*2/steps,b=(i+1)*Math.PI*2/steps;
+      pushTri(out,c,[p.x+Math.cos(a)*r,y,p.z+Math.sin(a)*r],[p.x+Math.cos(b)*r,y,p.z+Math.sin(b)*r]);
+    }
+  }
+
+  function laneCountForRoad(tags={}) {
+    const tagged=Number.parseInt(tags.lanes,10);
+    if(Number.isFinite(tagged)&&tagged>0&&tagged<9)return tagged;
+    const type=tags.highway||'';
+    const oneWay=/^(yes|1|-1)$/.test(String(tags.oneway||''));
+    if(oneWay)return /motorway|trunk|primary|secondary/.test(type)?2:1;
+    if(/service|living_street/.test(type))return 1;
+    return 2;
+  }
+
+  function appendWayLaneMarkings(out, segments, width, lanes, oneway) {
+    if(!segments.length||lanes<2)return;
+    const offsets=[];
+    for(let i=1;i<lanes;i++) offsets.push(-width/2+(width*i/lanes));
+    // A mapped one-way carriageway has only same-direction lane dividers. A normal
+    // two-way road also uses the center divider from the same calculated offsets.
+    for(const seg of segments) for(const offset of offsets) appendOffsetDashes(out,seg,offset);
+  }
+
+  function appendOffsetDashes(out, seg, offset) {
+    const dx=seg.bx-seg.ax,dz=seg.bz-seg.az,len=Math.hypot(dx,dz)||1;
+    if(len<7)return;
+    const ux=dx/len,uz=dz/len,nx=-uz,nz=ux;
+    const dash=4.4,gap=6.8,step=dash+gap,half=.075;
+    for(let start=2.4;start<len-1;start+=step){
+      const end=Math.min(len-.6,start+dash);
+      const ax=seg.ax+ux*start+nx*offset,az=seg.az+uz*start+nz*offset;
+      const bx=seg.ax+ux*end+nx*offset,bz=seg.az+uz*end+nz*offset;
+      const px=nx*half,pz=nz*half;
+      pushTri(out,[ax+px,.055,az+pz],[ax-px,.055,az-pz],[bx-px,.055,bz-pz]);
+      pushTri(out,[ax+px,.055,az+pz],[bx-px,.055,bz-pz],[bx+px,.055,bz+pz]);
+    }
+  }
+
+  function appendFlatPolygon(out, pts, y) {
+    if(!pts||pts.length<3)return false;
+    const area=Math.abs(polygonArea(pts));
+    if(area<8||area>180000)return false;
+    let tris;
+    try{tris=THREE.ShapeUtils.triangulateShape(pts.map(p=>new THREE.Vector2(p.x,p.z)),[]);}catch(_){return false;}
+    if(!tris?.length)return false;
+    for(const tri of tris){
+      const a=pts[tri[0]],b=pts[tri[1]],c=pts[tri[2]];
+      pushTri(out,[a.x,y,a.z],[b.x,y,b.z],[c.x,y,c.z]);
+    }
+    return true;
+  }
+
+  function polygonArea(pts) {
+    let a=0;
+    for(let i=0,j=pts.length-1;i<pts.length;j=i++) a+=pts[j].x*pts[i].z-pts[i].x*pts[j].z;
+    return a*.5;
+  }
+
+  function appendBuildingGeometry(out,b) {
+    const pts=b.pts, bottom=b.minHeight, top=b.h;
+    if(!pts||pts.length<3||top<=bottom+.5)return;
+    for(let i=0;i<pts.length;i++){
+      const a=pts[i],c=pts[(i+1)%pts.length];
+      const ab=[a.x,bottom,a.z],at=[a.x,top,a.z],cb=[c.x,bottom,c.z],ct=[c.x,top,c.z];
+      pushTri(out,ab,cb,ct);pushTri(out,ab,ct,at);
+    }
+    try{
+      const tris=THREE.ShapeUtils.triangulateShape(pts.map(p=>new THREE.Vector2(p.x,p.z)),[]);
+      for(const tri of tris){
+        const a=pts[tri[0]],c=pts[tri[1]],d=pts[tri[2]];
+        pushTri(out,[a.x,top,a.z],[c.x,top,c.z],[d.x,top,d.z]);
+      }
+    }catch(_){}
+  }
+
+  function isWaterFeature(tags={}) {
+    return tags.natural==='water'||tags.waterway==='riverbank';
+  }
+
+  function isParkFeature(tags={}) {
+    return tags.leisure==='park'||/^(grass|recreation_ground|meadow)$/.test(tags.landuse||'');
+  }
+
+  function addTrafficSignals(group, points) {
+    if(!points.length)return 0;
+    const count=Math.min(points.length,MAX_TRAFFIC_SIGNALS);
+    const poleGeo=new THREE.CylinderGeometry(.075,.095,2.55,6);
+    const headGeo=new THREE.BoxGeometry(.42,.84,.28);
+    const lampGeo=new THREE.SphereGeometry(.09,6,5);
+    const poles=new THREE.InstancedMesh(poleGeo,shared.signalPole,count);
+    const heads=new THREE.InstancedMesh(headGeo,shared.signalHead,count);
+    const reds=new THREE.InstancedMesh(lampGeo,shared.signalRed,count);
+    const ambers=new THREE.InstancedMesh(lampGeo,shared.signalAmber,count);
+    const greens=new THREE.InstancedMesh(lampGeo,shared.signalGreen,count);
+    const m=new THREE.Matrix4(),pos=new THREE.Vector3(),quat=new THREE.Quaternion(),scale=new THREE.Vector3(1,1,1);
+    for(let i=0;i<count;i++){
+      const p=points[i];
+      pos.set(p.x,1.275,p.z);m.compose(pos,quat,scale);poles.setMatrixAt(i,m);
+      pos.set(p.x,2.62,p.z);m.compose(pos,quat,scale);heads.setMatrixAt(i,m);
+      pos.set(p.x,2.86,p.z-.15);m.compose(pos,quat,scale);reds.setMatrixAt(i,m);
+      pos.set(p.x,2.62,p.z-.15);m.compose(pos,quat,scale);ambers.setMatrixAt(i,m);
+      pos.set(p.x,2.38,p.z-.15);m.compose(pos,quat,scale);greens.setMatrixAt(i,m);
+    }
+    [poles,heads,reds,ambers,greens].forEach(mesh=>{mesh.instanceMatrix.needsUpdate=true;mesh.castShadow=false;mesh.receiveShadow=false;group.add(mesh);});
+    return count;
+  }
+
+  function addRoadsideTrees(group, segments, centerX, centerZ, buildings=[]) {
     const trees=[];
     const maxTrees=190;
     for(let si=0;si<segments.length && trees.length<maxTrees;si++){
@@ -452,6 +672,7 @@
         const x=seg.ax+ux*d+nx*offset*side;
         const z=seg.az+uz*d+nz*offset*side;
         if(Math.hypot(x-centerX,z-centerZ)>BUILDING_RADIUS_METERS+260)continue;
+        if(pointHitsBuildingBounds(x,z,buildings,2.2))continue;
         const scale=.72+pseudoRandom(seed+Math.round(d)*13)*.62;
         trees.push({x,z,scale});
       }
@@ -475,6 +696,14 @@
     trunks.castShadow=false;trunks.receiveShadow=true;crowns.castShadow=false;crowns.receiveShadow=false;
     group.add(trunks,crowns);
     return trees.length;
+  }
+
+  function pointHitsBuildingBounds(x,z,buildings,pad=0) {
+    for(const b of buildings){
+      const q=b.bounds;
+      if(x>=q.minX-pad&&x<=q.maxX+pad&&z>=q.minZ-pad&&z<=q.maxZ+pad)return true;
+    }
+    return false;
   }
 
   function appendRoadQuad(out, seg, y) {
@@ -517,26 +746,80 @@
   }
 
   function buildingDescriptor(el, center) {
-    const pts=el.geometry.map(p=>project(p.lat,p.lon));
+    const pts=cleanPolygon(el.geometry.map(p=>project(p.lat,p.lon)));
+    if(pts.length<3)return null;
     let minX=Infinity,maxX=-Infinity,minZ=Infinity,maxZ=-Infinity;
     pts.forEach(p=>{minX=Math.min(minX,p.x);maxX=Math.max(maxX,p.x);minZ=Math.min(minZ,p.z);maxZ=Math.max(maxZ,p.z);});
+    const area=Math.abs(polygonArea(pts));
     const w=maxX-minX,d=maxZ-minZ;
-    if (w<2 || d<2 || w>190 || d>190) return null;
+    if(area<8||area>45000||w>260||d>260)return null;
     const x=(minX+maxX)/2,z=(minZ+maxZ)/2;
-    if (Math.hypot(x-center.x,z-center.z)>BUILDING_RADIUS_METERS+160) return null;
-    let h=Number.parseFloat(el.tags?.height);
-    if (!Number.isFinite(h)) {
-      const levels=Number.parseFloat(el.tags?.['building:levels']);
-      h=Number.isFinite(levels) ? Math.max(3,levels*3.05) : 8+pseudoRandom(el.id)*42;
+    const distance=Math.hypot(x-center.x,z-center.z);
+    if(distance>BUILDING_RADIUS_METERS+130)return null;
+
+    const tags=el.tags||{};
+    let h=parseMeasureMeters(tags.height);
+    const levels=Number.parseFloat(tags['building:levels']);
+    if(!Number.isFinite(h) && Number.isFinite(levels)){
+      let roofHeight=parseMeasureMeters(tags['roof:height']);
+      if(!Number.isFinite(roofHeight)){
+        const roofLevels=Number.parseFloat(tags['roof:levels']);
+        roofHeight=Number.isFinite(roofLevels)?Math.max(0,roofLevels*2.0):0;
+      }
+      h=Math.max(3,levels*3.05+roofHeight);
     }
-    h=Math.max(3,Math.min(h,160));
-    return { x,z,w,d,h,bucket: Math.abs(Number(el.id)||0)%4 };
+    if(!Number.isFinite(h))h=fallbackBuildingHeight(tags,el.id);
+    h=Math.max(3,Math.min(h,210));
+
+    let minHeight=parseMeasureMeters(tags.min_height);
+    if(!Number.isFinite(minHeight)){
+      const minLevel=Number.parseFloat(tags['building:min_level']);
+      minHeight=Number.isFinite(minLevel)?Math.max(0,minLevel*3.05):0;
+    }
+    minHeight=Math.max(0,Math.min(minHeight,h-1));
+    return {
+      pts,x,z,w,d,h,minHeight,distance,
+      bounds:{minX,maxX,minZ,maxZ},
+      bucket:buildingMaterialBucket(tags,el.id)
+    };
+  }
+
+  function fallbackBuildingHeight(tags,id) {
+    const t=String(tags.building||'').toLowerCase();
+    const r=pseudoRandom(id);
+    if(/apartments|residential|dormitory/.test(t))return 22+r*34;
+    if(/office|commercial|retail|hotel/.test(t))return 16+r*44;
+    if(/industrial|warehouse/.test(t))return 8+r*10;
+    if(/house|detached|terrace|semidetached_house/.test(t))return 6.5+r*4.5;
+    if(/school|hospital|civic|public|government/.test(t))return 10+r*18;
+    return 9+r*28;
+  }
+
+  function buildingMaterialBucket(tags,id) {
+    const t=String(tags.building||'').toLowerCase();
+    if(/apartments|residential|dormitory|house|detached|terrace/.test(t))return 0;
+    if(/office|commercial|retail|hotel/.test(t))return 1;
+    if(/industrial|warehouse|garage/.test(t))return 2;
+    if(/school|hospital|civic|public|government|university/.test(t))return 3;
+    return Math.abs(Number(id)||0)%4;
+  }
+
+  function parseMeasureMeters(value) {
+    if(value==null)return NaN;
+    const raw=String(value).trim().toLowerCase().replace(',','.');
+    const n=Number.parseFloat(raw);
+    if(!Number.isFinite(n))return NaN;
+    if(/ft|feet|foot|'/.test(raw))return n*.3048;
+    return n;
   }
 
   function widthForRoad(tags) {
+    const explicit=parseMeasureMeters(tags.width);
+    if(Number.isFinite(explicit)&&explicit>=2&&explicit<=30)return explicit;
     const base=ROAD_WIDTHS[tags.highway]||5.5;
     const lanes=Number.parseInt(tags.lanes,10);
-    return Number.isFinite(lanes)&&lanes>1 ? Math.max(base,Math.min(15.5,lanes*3.05)) : base;
+    if(Number.isFinite(lanes)&&lanes>0)return Math.max(base,Math.min(18,lanes*3.05+.55));
+    return base;
   }
   function isMajorRoad(type) { return /motorway|trunk|primary|secondary/.test(type); }
   function roadDisplayName(tags = {}) {
@@ -618,13 +901,15 @@
     dynamicWorld=built.group;
     scene.add(dynamicWorld);
     roadSegments=built.segments;
+    buildingColliders=built.buildingColliders||[];
     rebuildRoadIndex();
+    rebuildBuildingIndex();
     if(previous){scene.remove(previous);disposeWorldGroup(previous);}
-    console.info(`DriveSG world: ${built.roadCount} road ways, ${built.buildingCount} buildings, ${built.treeCount||0} trees, ${built.segments.length} road segments`);
+    console.info(`DriveSG world: ${built.roadCount} road ways, ${built.buildingCount} buildings, ${built.trafficSignalCount||0} traffic signals, ${built.treeCount||0} trees, ${built.segments.length} road segments`);
   }
 
   function disposeWorldGroup(group) {
-    const retained = new Set([shared.road, shared.majorRoad, shared.line, shared.treeTrunk, shared.treeLeaf, ...shared.buildings]);
+    const retained = new Set([shared.roadEdge, shared.road, shared.majorRoad, shared.line, shared.water, shared.park, shared.treeTrunk, shared.treeLeaf, shared.signalPole, shared.signalHead, shared.signalRed, shared.signalAmber, shared.signalGreen, ...shared.buildings]);
     group.traverse(obj=>{
       if(obj.geometry) obj.geometry.dispose?.();
       const mats = Array.isArray(obj.material) ? obj.material : (obj.material ? [obj.material] : []);
@@ -652,6 +937,42 @@
       for(const seg of arr){if(!seen.has(seg)){seen.add(seg);found.push(seg);}}
     }
     return found;
+  }
+
+  function rebuildBuildingIndex() {
+    buildingIndex=new Map();
+    const cell=120;
+    for(const b of buildingColliders){
+      if(b.minHeight>2.4)continue;
+      const q=b.bounds;
+      const minX=Math.floor(q.minX/cell),maxX=Math.floor(q.maxX/cell),minZ=Math.floor(q.minZ/cell),maxZ=Math.floor(q.maxZ/cell);
+      for(let gx=minX;gx<=maxX;gx++)for(let gz=minZ;gz<=maxZ;gz++){
+        const key=`${gx},${gz}`;
+        if(!buildingIndex.has(key))buildingIndex.set(key,[]);
+        buildingIndex.get(key).push(b);
+      }
+    }
+  }
+
+  function carHitsBuilding(x,z) {
+    const cell=120,gx=Math.floor(x/cell),gz=Math.floor(z/cell);
+    const candidates=buildingIndex.get(`${gx},${gz}`)||[];
+    for(const b of candidates){
+      const q=b.bounds;
+      if(x<q.minX-.9||x>q.maxX+.9||z<q.minZ-.9||z>q.maxZ+.9)continue;
+      if(pointInPolygonXZ(x,z,b.pts))return true;
+    }
+    return false;
+  }
+
+  function pointInPolygonXZ(x,z,pts) {
+    let inside=false;
+    for(let i=0,j=pts.length-1;i<pts.length;j=i++){
+      const a=pts[i],b=pts[j];
+      const crosses=((a.z>z)!==(b.z>z))&&(x<(b.x-a.x)*(z-a.z)/((b.z-a.z)||1e-9)+a.x);
+      if(crosses)inside=!inside;
+    }
+    return inside;
   }
 
   function closestPointOnSegment(px,pz,seg) {
@@ -769,6 +1090,12 @@
     const fx=Math.sin(car.rotation.y),fz=Math.cos(car.rotation.y);
     car.position.x+=fx*speedMps*dt;
     car.position.z+=fz*speedMps*dt;
+
+    if(carHitsBuilding(car.position.x,car.position.z)){
+      car.position.x=beforeX;
+      car.position.z=beforeZ;
+      speedMps*=-.08;
+    }
 
     const coords=unproject(car.position.x,car.position.z);
     if(!insideSingapore(coords.lat,coords.lon)){
