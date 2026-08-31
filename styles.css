@@ -141,21 +141,27 @@ button { color: inherit; border: 0; -webkit-appearance: none; appearance: none; 
   left: 50%;
   bottom: calc(16px + var(--safe-bottom));
   transform: translateX(-50%);
-  height: 58px;
+  height: 60px;
+  max-width: min(390px, 43vw);
   display: flex;
   align-items: center;
-  padding: 6px 12px 6px 14px;
+  padding: 6px 13px 6px 14px;
   border: 1px solid var(--line);
   border-radius: 18px;
   background: rgba(5,10,13,.60);
   backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);
   pointer-events: none;
 }
-.speed-readout { display: flex; align-items: baseline; gap: 5px; min-width: 78px; }
+.speed-readout { display: flex; align-items: baseline; gap: 5px; min-width: 78px; flex: 0 0 auto; }
 #speed { font-size: 28px; font-weight: 820; letter-spacing: -.06em; font-variant-numeric: tabular-nums; }
 .speed-readout small { color: var(--muted); font-size: 8px; }
-.gear { min-width: 29px; margin-left: 8px; padding-left: 10px; border-left: 1px solid var(--line); font-size: 12px; font-weight: 850; }
-.surface-state { margin-left: 6px; color: #a8deb9; font-size: 8px; font-weight: 800; letter-spacing: .08em; }
+.gear { min-width: 29px; margin-left: 6px; padding-left: 9px; border-left: 1px solid var(--line); font-size: 12px; font-weight: 850; flex: 0 0 auto; }
+.hud-meta { min-width: 0; margin-left: 8px; padding-left: 9px; border-left: 1px solid var(--line); }
+.hud-meta strong { display:block; max-width: 165px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:9px; line-height:1.15; letter-spacing:-.01em; }
+.hud-meta-line { display:flex; align-items:center; gap:4px; margin-top:4px; color:rgba(255,255,255,.48); font-size:7px; white-space:nowrap; font-variant-numeric:tabular-nums; }
+.hud-meta-line b { color:rgba(255,255,255,.78); font-weight:800; }
+.hud-sep { color:rgba(255,255,255,.22); }
+.surface-state { color: #a8deb9; font-size: 7px; font-weight: 800; letter-spacing: .06em; }
 .surface-state.offroad { color: #ff9b91; }
 
 .drive-controls {
@@ -285,4 +291,18 @@ body.panel-open .drive-controls, body.panel-open .drive-hud, body.panel-open .dr
   .preset strong { font-size: 10px; }
   .preset span { display: none; }
   .panel-foot { margin-top: 9px; font-size: 7px; }
+}
+
+
+@media (orientation: landscape) and (max-width: 760px) {
+  .drive-hud { max-width: 38vw; padding-left: 10px; padding-right: 10px; }
+  .speed-readout { min-width: 65px; }
+  #speed { font-size: 24px; }
+  .hud-meta strong { max-width: 110px; }
+  .hud-meta-line { gap: 3px; font-size: 6px; }
+}
+
+@media (orientation: landscape) and (min-width: 761px) and (max-width: 900px) {
+  .drive-hud { max-width: 36vw; }
+  .hud-meta strong { max-width: 105px; }
 }

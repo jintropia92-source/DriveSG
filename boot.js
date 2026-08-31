@@ -37,7 +37,7 @@
     }
 
     try {
-      await loadScript('app.js');
+      await loadScript('app.js?b=20260901a');
     } catch (err) {
       console.error(err);
       if (title) title.textContent = 'DriveSG could not start';

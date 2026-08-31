@@ -61,6 +61,13 @@
   let qualityPixelRatio = Math.min(window.devicePixelRatio || 1, 1.45);
   let basePixelRatio = qualityPixelRatio;
   let mapMode = 'live';
+  let sessionDistanceM = 0;
+  let sessionTopSpeedKmh = 0;
+  let reverseHold = 0;
+  let longitudinalVisual = 0;
+  let tailLightMaterial = null;
+  let lastRoadLabel = '';
+  const mapCache = new Map();
 
   const input = { gas: 0, brake: 0, steer: 0 };
   const shared = {};
@@ -82,6 +89,9 @@
     speed: document.getElementById('speed'),
     gear: document.getElementById('gear'),
     surfaceState: document.getElementById('surfaceState'),
+    roadName: document.getElementById('roadName'),
+    tripDistance: document.getElementById('tripDistance'),
+    topSpeed: document.getElementById('topSpeed'),
     steerZone: document.getElementById('steerZone'),
     steerKnob: document.getElementById('steerKnob'),
     gasBtn: document.getElementById('gasBtn'),
@@ -176,6 +186,8 @@
       new THREE.MeshStandardMaterial({ color: 0xaeb3b4, roughness: 0.93 }),
       new THREE.MeshStandardMaterial({ color: 0xd3d3cd, roughness: 0.93 })
     ];
+    shared.treeTrunk = new THREE.MeshStandardMaterial({ color: 0x625341, roughness: 1 });
+    shared.treeLeaf = new THREE.MeshStandardMaterial({ color: 0x567459, roughness: 1 });
   }
 
   function addHorizonHaze() {
@@ -191,7 +203,8 @@
     const trimMat = new THREE.MeshStandardMaterial({ color: 0x121719, roughness: .65 });
     const glassMat = new THREE.MeshStandardMaterial({ color: 0x22343e, metalness: .12, roughness: .20 });
     const headMat = new THREE.MeshStandardMaterial({ color: 0xfff2ce, emissive: 0x443417, emissiveIntensity: .5 });
-    const tailMat = new THREE.MeshStandardMaterial({ color: 0xbf2732, emissive: 0x33080b, emissiveIntensity: .7 });
+    const tailMat = new THREE.MeshStandardMaterial({ color: 0xbf2732, emissive: 0x5a090e, emissiveIntensity: .65 });
+    tailLightMaterial = tailMat;
 
     carBody = new THREE.Mesh(new THREE.BoxGeometry(1.88, .58, 4.05), bodyMat);
     carBody.position.y = .75;
@@ -256,6 +269,7 @@
     els.locationName.textContent = currentLocationName;
     els.searchMsg.textContent = '';
     speedMps = 0;
+    resetSessionStats();
     input.gas = input.brake = input.steer = 0;
     updateSteerKnob(0);
     showLoader(`Preparing ${currentLocationName}…`, 5);
@@ -297,6 +311,9 @@
   }
 
   async function fetchOsmData(lat, lon) {
+    const cacheKey = `${lat.toFixed(4)},${lon.toFixed(4)}`;
+    if (mapCache.has(cacheKey)) return mapCache.get(cacheKey);
+
     const query = `[out:json][timeout:22];(
       way["highway"~"${ROAD_QUERY}"](around:${ROAD_RADIUS_METERS},${lat},${lon});
       way["building"](around:${BUILDING_RADIUS_METERS},${lat},${lon});
@@ -316,6 +333,8 @@
         if (!res.ok) throw new Error(`Map service returned ${res.status}`);
         const json = await res.json();
         if (!json?.elements?.length) throw new Error('No map elements returned');
+        mapCache.set(cacheKey, json);
+        while (mapCache.size > 4) mapCache.delete(mapCache.keys().next().value);
         return json;
       } catch (err) {
         lastError = err;
@@ -342,7 +361,10 @@
     };
   }
 
-  function buildWorld(data, center) {
+  function buildWorld(data, center = {}) {
+    const centerX = Number.isFinite(center.x) ? center.x : (Number.isFinite(center.centerX) ? center.centerX : 0);
+    const centerZ = Number.isFinite(center.z) ? center.z : (Number.isFinite(center.centerZ) ? center.centerZ : 0);
+    const normalizedCenter = { x: centerX, z: centerZ };
     const group = new THREE.Group();
     const segments = [];
     const roadVerts = [];
@@ -363,14 +385,18 @@
           const dx = b.x - a.x, dz = b.z - a.z;
           const length = Math.hypot(dx, dz);
           if (length < .6 || length > 1500) continue;
-          const seg = { ax:a.x, az:a.z, bx:b.x, bz:b.z, width, major, oneway: el.tags?.oneway || '' };
+          const seg = {
+            ax:a.x, az:a.z, bx:b.x, bz:b.z, width, major,
+            oneway: el.tags?.oneway || '',
+            name: roadDisplayName(el.tags)
+          };
           segments.push(seg);
           appendRoadQuad(major ? majorVerts : roadVerts, seg, 0.025);
           if (major && length > 16) appendCenterDashes(lineVerts, seg);
         }
         roadCount++;
       } else if (el.tags?.building) {
-        const b = buildingDescriptor(el, center);
+        const b = buildingDescriptor(el, normalizedCenter);
         if (b) buildings[b.bucket].push(b);
       }
     }
@@ -404,8 +430,51 @@
       group.add(instanced);
     });
 
-    addLandmarksTo(group, center.x, center.z);
-    return { group, segments, roadCount, buildingCount: buildings.reduce((n,a)=>n+a.length,0) };
+    const treeCount = addRoadsideTrees(group, segments, centerX, centerZ);
+    addLandmarksTo(group, centerX, centerZ);
+    return { group, segments, roadCount, buildingCount: buildings.reduce((n,a)=>n+a.length,0), treeCount };
+  }
+
+  function addRoadsideTrees(group, segments, centerX, centerZ) {
+    const trees=[];
+    const maxTrees=190;
+    for(let si=0;si<segments.length && trees.length<maxTrees;si++){
+      const seg=segments[si];
+      const dx=seg.bx-seg.ax,dz=seg.bz-seg.az,len=Math.hypot(dx,dz);
+      if(len<28)continue;
+      const ux=dx/len,uz=dz/len,nx=-uz,nz=ux;
+      const spacing=seg.major?48:68;
+      const seed=Math.abs(Math.round(seg.ax*3+seg.az*5+si*17));
+      const phase=pseudoRandom(seed+1)*spacing*.7;
+      for(let d=spacing*.45+phase;d<len && trees.length<maxTrees;d+=spacing){
+        const side=pseudoRandom(seed+Math.round(d)*7)>.5?1:-1;
+        const offset=seg.width/2+4.5+pseudoRandom(seed+Math.round(d)*11)*3.8;
+        const x=seg.ax+ux*d+nx*offset*side;
+        const z=seg.az+uz*d+nz*offset*side;
+        if(Math.hypot(x-centerX,z-centerZ)>BUILDING_RADIUS_METERS+260)continue;
+        const scale=.72+pseudoRandom(seed+Math.round(d)*13)*.62;
+        trees.push({x,z,scale});
+      }
+    }
+    if(!trees.length)return 0;
+
+    const trunkGeo=new THREE.CylinderGeometry(.22,.31,3.1,6);
+    const crownGeo=new THREE.IcosahedronGeometry(2.15,1);
+    const trunks=new THREE.InstancedMesh(trunkGeo,shared.treeTrunk,trees.length);
+    const crowns=new THREE.InstancedMesh(crownGeo,shared.treeLeaf,trees.length);
+    const m=new THREE.Matrix4(),pos=new THREE.Vector3(),quat=new THREE.Quaternion(),scale=new THREE.Vector3();
+    trees.forEach((t,i)=>{
+      scale.set(t.scale,t.scale,t.scale);
+      pos.set(t.x,1.55*t.scale,t.z);
+      m.compose(pos,quat,scale);trunks.setMatrixAt(i,m);
+      pos.set(t.x,(4.55+(.35*pseudoRandom(i+51)))*t.scale,t.z);
+      scale.set(t.scale*(.86+pseudoRandom(i+81)*.25),t.scale*(.82+pseudoRandom(i+91)*.28),t.scale*(.86+pseudoRandom(i+101)*.25));
+      m.compose(pos,quat,scale);crowns.setMatrixAt(i,m);
+    });
+    trunks.instanceMatrix.needsUpdate=true;crowns.instanceMatrix.needsUpdate=true;
+    trunks.castShadow=false;trunks.receiveShadow=true;crowns.castShadow=false;crowns.receiveShadow=false;
+    group.add(trunks,crowns);
+    return trees.length;
   }
 
   function appendRoadQuad(out, seg, y) {
@@ -470,6 +539,13 @@
     return Number.isFinite(lanes)&&lanes>1 ? Math.max(base,Math.min(15.5,lanes*3.05)) : base;
   }
   function isMajorRoad(type) { return /motorway|trunk|primary|secondary/.test(type); }
+  function roadDisplayName(tags = {}) {
+    if (tags.name) return tags.name;
+    if (tags.ref) return tags.ref;
+    const type = String(tags.highway || '').replace(/_/g, ' ');
+    if (!type) return 'Singapore road';
+    return type.replace(/\b\w/g, c => c.toUpperCase());
+  }
   function pseudoRandom(seed) { const x=Math.sin(Number(seed||1)*12.9898)*43758.5453; return x-Math.floor(x); }
 
   function addLandmarksTo(group, centerX, centerZ) {
@@ -515,7 +591,7 @@
     roads.forEach((line,idx)=>{
       const points=line.map(([x,z])=>({x,z}));
       for(let i=0;i<points.length-1;i++){
-        const seg={ax:points[i].x,az:points[i].z,bx:points[i+1].x,bz:points[i+1].z,width:idx<4?9.5:7,major:idx<4,oneway:''};
+        const seg={ax:points[i].x,az:points[i].z,bx:points[i+1].x,bz:points[i+1].z,width:idx<4?9.5:7,major:idx<4,oneway:'',name:'DriveSG demo road'};
         segments.push(seg); appendRoadQuad(roadVerts,seg,.025); if(idx<4)appendCenterDashes(lineVerts,seg);
       }
     });
@@ -532,8 +608,9 @@
     const m=new THREE.Matrix4(),pos=new THREE.Vector3(),quat=new THREE.Quaternion(),scale=new THREE.Vector3();
     boxes.forEach((b,i)=>{pos.set(b.x,b.h/2,b.z);scale.set(b.w,b.h,b.d);m.compose(pos,quat,scale);inst.setMatrixAt(i,m);});
     inst.instanceMatrix.needsUpdate=true; group.add(inst);
+    const treeCount=addRoadsideTrees(group,segments,0,0);
     addLandmarksTo(group,0,0);
-    return {group,segments,roadCount:roads.length,buildingCount:boxes.length};
+    return {group,segments,roadCount:roads.length,buildingCount:boxes.length,treeCount};
   }
 
   function swapDynamicWorld(built) {
@@ -543,11 +620,11 @@
     roadSegments=built.segments;
     rebuildRoadIndex();
     if(previous){scene.remove(previous);disposeWorldGroup(previous);}
-    console.info(`DriveSG world: ${built.roadCount} road ways, ${built.buildingCount} buildings, ${built.segments.length} road segments`);
+    console.info(`DriveSG world: ${built.roadCount} road ways, ${built.buildingCount} buildings, ${built.treeCount||0} trees, ${built.segments.length} road segments`);
   }
 
   function disposeWorldGroup(group) {
-    const retained = new Set([shared.road, shared.majorRoad, shared.line, ...shared.buildings]);
+    const retained = new Set([shared.road, shared.majorRoad, shared.line, shared.treeTrunk, shared.treeLeaf, ...shared.buildings]);
     group.traverse(obj=>{
       if(obj.geometry) obj.geometry.dispose?.();
       const mats = Array.isArray(obj.material) ? obj.material : (obj.material ? [obj.material] : []);
@@ -618,6 +695,7 @@
     const yaw=Math.atan2(dx,dz);
     spawnPose={x:px,z:pz,yaw};
     speedMps=0;
+    reverseHold=0;
     car.position.set(px,.07,pz);
     car.rotation.set(0,yaw,0);
     steeringVisual=0;
@@ -632,75 +710,126 @@
     const panelOpen=els.placesPanel.classList.contains('open');
     const gas=panelOpen?0:input.gas,brake=panelOpen?0:input.brake,steer=panelOpen?0:input.steer;
 
-    const accel=7.2;
-    const brakeForce=15.5;
-    const reverseAccel=5.2;
+    const accel=7.0;
+    const brakeForce=15.8;
+    const reverseAccel=4.8;
+
     if(gas>0){
-      if(speedMps<-0.5)speedMps+=brakeForce*dt;
+      reverseHold=0;
+      if(speedMps<-0.45)speedMps+=brakeForce*dt;
       else speedMps+=accel*gas*dt;
     }
+
     if(brake>0){
-      if(speedMps>0.65)speedMps-=brakeForce*brake*dt;
-      else speedMps-=reverseAccel*brake*dt;
+      if(speedMps>0.5){
+        reverseHold=0;
+        speedMps-=brakeForce*brake*dt;
+      }else{
+        if(speedMps>-.12){
+          speedMps=0;
+          reverseHold+=dt;
+        }
+        if(reverseHold>.22 || speedMps<-.12) speedMps-=reverseAccel*brake*dt;
+      }
+    }else if(!gas){
+      reverseHold=0;
     }
 
     if(!gas&&!brake){
-      const drag=(onRoad?0.72:2.75)*dt;
+      const drag=(onRoad?0.78:2.9)*dt;
       if(Math.abs(speedMps)<=drag)speedMps=0;else speedMps-=Math.sign(speedMps)*drag;
     }
 
-    const maxForward=onRoad?36.2:13.5;
-    speedMps=THREE.MathUtils.clamp(speedMps,-9.5,maxForward);
+    const maxForward=onRoad?35.0:12.8;
+    speedMps=THREE.MathUtils.clamp(speedMps,-8.8,maxForward);
 
     const absSpeed=Math.abs(speedMps);
-    const steerLimit=THREE.MathUtils.lerp(.54,.22,Math.min(absSpeed/34,1));
-    const wheelbase=2.55;
-    if(absSpeed>.12){
-      const yawRate=(speedMps/wheelbase)*Math.tan(steer*steerLimit);
-      car.rotation.y+=yawRate*dt;
+    const steerLimit=THREE.MathUtils.lerp(.46,.17,Math.min(absSpeed/33,1));
+    const wheelbase=2.68;
+    if(absSpeed>.10){
+      const rawYawRate=(speedMps/wheelbase)*Math.tan(steer*steerLimit);
+      const yawRate=THREE.MathUtils.clamp(rawYawRate,-1.75,1.75);
+      // Camera faces the car's +Z direction from behind; subtracting yaw makes a rightward thumb slide turn right on screen.
+      car.rotation.y-=yawRate*dt;
     }
 
-    steeringVisual+=(steer-steeringVisual)*Math.min(1,dt*10);
-    if(carBody)carBody.rotation.z=-steeringVisual*.032*Math.min(absSpeed/8,1);
+    steeringVisual+=(steer-steeringVisual)*Math.min(1,dt*11);
+    const longitudinalTarget=(brake>0?.030:0)-(gas>0?.014:0);
+    longitudinalVisual+=(longitudinalTarget-longitudinalVisual)*Math.min(1,dt*7);
+    if(carBody){
+      carBody.rotation.z=-steeringVisual*.029*Math.min(absSpeed/8,1);
+      carBody.rotation.x=longitudinalVisual;
+    }
     frontWheels.forEach(p=>p.rotation.y=-steeringVisual*.36);
     const wheelSpin=speedMps*dt/.35;
     allWheels.forEach(w=>w.rotation.x+=wheelSpin);
+    if(tailLightMaterial) tailLightMaterial.emissiveIntensity=brake>0?3.0:.65;
 
+    const beforeX=car.position.x,beforeZ=car.position.z;
     const fx=Math.sin(car.rotation.y),fz=Math.cos(car.rotation.y);
     car.position.x+=fx*speedMps*dt;
     car.position.z+=fz*speedMps*dt;
 
     const coords=unproject(car.position.x,car.position.z);
     if(!insideSingapore(coords.lat,coords.lon)){
-      car.position.x-=fx*speedMps*dt*1.5;
-      car.position.z-=fz*speedMps*dt*1.5;
+      car.position.x=beforeX;
+      car.position.z=beforeZ;
       speedMps*=.15;
       showToast('Singapore boundary reached');
+    }else if(!panelOpen){
+      const moved=Math.hypot(car.position.x-beforeX,car.position.z-beforeZ);
+      if(moved<4) sessionDistanceM+=moved;
     }
 
     if(elapsed-lastOnRoadCheck>.18){
       lastOnRoadCheck=elapsed;
-      const d=nearestRoadDistance(car.position.x,car.position.z);
-      onRoad=d<3.0;
+      const hit=nearestRoadHit(car.position.x,car.position.z,false);
+      const edgeDist=hit?Math.max(0,hit.dist-hit.seg.width/2):Infinity;
+      onRoad=edgeDist<3.0;
       els.surfaceState.textContent=onRoad?'ON ROAD':'OFF ROAD';
       els.surfaceState.classList.toggle('offroad',!onRoad);
+      const label=hit?.seg?.name || (onRoad?'Singapore road':'Off road');
+      if(label!==lastRoadLabel){
+        lastRoadLabel=label;
+        if(els.roadName)els.roadName.textContent=label;
+      }
     }
 
-    els.speed.textContent=Math.round(absSpeed*3.6);
+    const speedKmh=Math.round(absSpeed*3.6);
+    sessionTopSpeedKmh=Math.max(sessionTopSpeedKmh,speedKmh);
+    els.speed.textContent=speedKmh;
     els.gear.textContent=speedMps<-.25?'R':'D';
+    if(els.tripDistance)els.tripDistance.textContent=formatTripDistance(sessionDistanceM);
+    if(els.topSpeed)els.topSpeed.textContent=String(sessionTopSpeedKmh);
   }
 
   function updateCamera(dt) {
     const fx=Math.sin(car.rotation.y),fz=Math.cos(car.rotation.y);
-    const speedRatio=Math.min(Math.abs(speedMps)/36,1);
-    const back=THREE.MathUtils.lerp(12.6,15.6,speedRatio);
-    const height=THREE.MathUtils.lerp(6.1,7.0,speedRatio);
-    const lookAhead=THREE.MathUtils.lerp(4.5,7.4,speedRatio);
-    const desired=new THREE.Vector3(car.position.x-fx*back,car.position.y+height,car.position.z-fz*back);
-    const target=new THREE.Vector3(car.position.x+fx*lookAhead,car.position.y+1.65,car.position.z+fz*lookAhead);
-    const alpha=1-Math.pow(.0025,dt);
+    const speedRatio=Math.min(Math.abs(speedMps)/35,1);
+    const back=THREE.MathUtils.lerp(12.2,15.0,speedRatio);
+    const height=THREE.MathUtils.lerp(5.9,6.8,speedRatio);
+    const lookAhead=THREE.MathUtils.lerp(4.7,8.0,speedRatio);
+    const sideX=fz,sideZ=-fx;
+    const anticipation=steeringVisual*THREE.MathUtils.lerp(.25,1.25,speedRatio);
+    const desired=new THREE.Vector3(
+      car.position.x-fx*back+sideX*anticipation,
+      car.position.y+height,
+      car.position.z-fz*back+sideZ*anticipation
+    );
+    const target=new THREE.Vector3(
+      car.position.x+fx*lookAhead-sideX*anticipation*.45,
+      car.position.y+1.62,
+      car.position.z+fz*lookAhead-sideZ*anticipation*.45
+    );
+    const alpha=1-Math.pow(.0028,dt);
     camera.position.lerp(desired,alpha);
     camera.lookAt(target);
+
+    const desiredFov=59+speedRatio*5.5;
+    if(Math.abs(camera.fov-desiredFov)>.02){
+      camera.fov+= (desiredFov-camera.fov)*Math.min(1,dt*3.5);
+      camera.updateProjectionMatrix();
+    }
 
     sun.position.set(car.position.x-110,190,car.position.z-90);
     sunTarget.position.set(car.position.x,0,car.position.z);
@@ -854,7 +983,7 @@
     btn.addEventListener('lostpointercapture',up,{passive:false});
   }
 
-  function clearInputs() { input.gas=input.brake=input.steer=0; els.gasBtn.classList.remove('active');els.brakeBtn.classList.remove('active');updateSteerKnob(0); }
+  function clearInputs() { input.gas=input.brake=input.steer=0; reverseHold=0; els.gasBtn.classList.remove('active');els.brakeBtn.classList.remove('active');updateSteerKnob(0); }
 
   function setPanelOpen(open) {
     els.placesPanel.classList.toggle('open',open);
@@ -895,6 +1024,21 @@
   }
 
   function insideSingapore(lat,lon){return lat>=SG_BOUNDS.minLat&&lat<=SG_BOUNDS.maxLat&&lon>=SG_BOUNDS.minLon&&lon<=SG_BOUNDS.maxLon;}
+
+  function resetSessionStats(){
+    sessionDistanceM=0;
+    sessionTopSpeedKmh=0;
+    reverseHold=0;
+    lastRoadLabel='';
+    if(els.tripDistance)els.tripDistance.textContent='0 m';
+    if(els.topSpeed)els.topSpeed.textContent='0';
+    if(els.roadName)els.roadName.textContent=currentLocationName || 'Singapore road';
+  }
+
+  function formatTripDistance(meters){
+    if(meters<1000)return `${Math.round(meters)} m`;
+    return `${(meters/1000).toFixed(meters<10000?1:0)} km`;
+  }
 
   function showLoader(text,pct){els.loader.classList.remove('hidden');els.loaderTitle.textContent='Building Singapore';setProgress(pct,text);}
   function hideLoader(){els.loader.classList.add('hidden');}

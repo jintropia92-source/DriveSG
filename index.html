@@ -9,7 +9,7 @@
   <meta name="apple-mobile-web-app-title" content="DriveSG" />
   <meta name="format-detection" content="telephone=no" />
   <title>DriveSG — Singapore, playable.</title>
-  <link rel="stylesheet" href="styles.css" />
+  <link rel="stylesheet" href="styles.css?b=20260901a" />
 </head>
 <body>
   <main id="app" aria-label="DriveSG">
@@ -66,10 +66,19 @@
     <section class="drive-hud" aria-label="Driving information">
       <div class="speed-readout"><span id="speed">0</span><small>km/h</small></div>
       <div id="gear" class="gear">D</div>
-      <div id="surfaceState" class="surface-state">ON ROAD</div>
+      <div class="hud-meta">
+        <strong id="roadName">Marina Bay</strong>
+        <div class="hud-meta-line">
+          <span id="surfaceState" class="surface-state">ON ROAD</span>
+          <span class="hud-sep">·</span>
+          <span id="tripDistance">0 m</span>
+          <span class="hud-sep">·</span>
+          <span>TOP <b id="topSpeed">0</b></span>
+        </div>
+      </div>
     </section>
 
-    <div id="driveHint" class="drive-hint">Drag to steer&nbsp;&nbsp;·&nbsp;&nbsp;Hold GO to accelerate</div>
+    <div id="driveHint" class="drive-hint">Slide left / right to steer&nbsp;&nbsp;·&nbsp;&nbsp;Hold GO to accelerate</div>
 
     <section id="mobileControls" class="drive-controls" aria-label="Driving controls">
       <div id="steerZone" class="steer-zone" aria-label="Steering pad">
@@ -98,6 +107,6 @@
     <footer class="attribution">© OpenStreetMap contributors</footer>
   </main>
 
-  <script src="boot.js"></script>
+  <script src="boot.js?b=20260901a"></script>
 </body>
 </html>
