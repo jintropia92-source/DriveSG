@@ -3,13 +3,14 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover" />
-  <meta name="theme-color" content="#091014" />
+  <meta name="theme-color" content="#071014" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="apple-mobile-web-app-title" content="DriveSG" />
   <meta name="format-detection" content="telephone=no" />
+  <meta name="color-scheme" content="dark" />
   <title>DriveSG — Singapore, playable.</title>
-  <link rel="stylesheet" href="styles.css?b=20260901b" />
+  <link rel="stylesheet" href="styles.css?b=20260901mega" />
 </head>
 <body>
   <main id="app" aria-label="DriveSG">
@@ -24,48 +25,86 @@
     </div>
 
     <header class="topbar">
-      <button id="placesBtn" class="place-pill" type="button" aria-label="Choose location">
+      <button id="placesBtn" class="place-pill" type="button" aria-label="Open places and navigation">
         <span class="live-dot" id="mapDot"></span>
-        <span class="place-copy"><small>DRIVING</small><strong id="locationName">Marina Bay</strong></span>
+        <span class="place-copy"><small id="placeEyebrow">DRIVING AROUND</small><strong id="locationName">Marina Bay</strong></span>
         <span class="chevron">⌄</span>
       </button>
       <div class="top-actions">
+        <button id="soundBtn" class="round-action" type="button" aria-label="Toggle engine sound" title="Engine sound">♪</button>
         <button id="resetBtn" class="round-action" type="button" aria-label="Reset car to road" title="Reset car">↻</button>
       </div>
     </header>
 
-    <aside id="placesPanel" class="places-panel open" aria-label="Choose where to drive">
+    <section id="navBanner" class="nav-banner" aria-live="polite">
+      <div id="navArrow" class="nav-arrow">↑</div>
+      <div class="nav-copy">
+        <strong id="navInstruction">Continue straight</strong>
+        <span><b id="navTurnDistance">—</b><i>·</i><span id="navDestinationName">Destination</span></span>
+      </div>
+      <div class="nav-summary">
+        <strong id="navRemaining">—</strong>
+        <span id="navEta">—</span>
+      </div>
+      <button id="cancelNavBtn" class="nav-close" type="button" aria-label="Cancel navigation">×</button>
+    </section>
+
+    <section id="miniMapCard" class="minimap-card" aria-label="Navigation map">
+      <canvas id="miniMapCanvas" width="400" height="300"></canvas>
+      <div class="minimap-topline">
+        <span id="compassLabel">HDG</span>
+        <div class="minimap-actions">
+          <button id="mapExpandBtn" type="button" aria-label="Expand route map">⛶</button>
+          <button id="mapOrientationBtn" type="button" aria-label="Toggle map orientation">↗</button>
+        </div>
+      </div>
+      <div id="miniMapFooter" class="minimap-footer">Explore Singapore</div>
+    </section>
+
+    <aside id="placesPanel" class="places-panel open" aria-label="Places and navigation">
       <div class="panel-head">
         <div>
-          <div class="eyebrow">DRIVESG</div>
-          <h1>Where do you want to drive?</h1>
-          <p>Pick a Singapore starting point. The road world refreshes around you as you keep driving.</p>
+          <div class="eyebrow">DRIVESG NAVIGATION</div>
+          <h1 id="panelTitle">Where do you want to go?</h1>
+          <p id="panelIntro">Pick a destination and DriveSG will guide you there. Use “Start here” only when you want to teleport to a different starting area.</p>
         </div>
-        <button id="closePanelBtn" class="close-btn" type="button" aria-label="Close locations">×</button>
+        <button id="closePanelBtn" class="close-btn" type="button" aria-label="Close places">×</button>
+      </div>
+
+      <div class="mode-switch" role="group" aria-label="Place selection mode">
+        <button id="navigateModeBtn" class="active" type="button">Navigate to</button>
+        <button id="startModeBtn" type="button">Start here</button>
       </div>
 
       <div class="quick-row">
-        <button id="nearMeBtn" class="quick-btn" type="button"><span>◎</span><strong>Near me</strong></button>
-        <button id="randomBtn" class="quick-btn" type="button"><span>↝</span><strong>Random</strong></button>
+        <button id="nearMeBtn" class="quick-btn" type="button"><span>◎</span><strong>Use my location</strong></button>
+        <button id="randomBtn" class="quick-btn" type="button"><span>↝</span><strong id="randomBtnLabel">Random destination</strong></button>
       </div>
 
       <form id="searchForm" class="search-row" role="search">
-        <input id="searchInput" autocomplete="off" autocapitalize="words" enterkeyhint="search" inputmode="search" placeholder="Search Singapore, e.g. Bugis" aria-label="Search Singapore location" />
+        <input id="searchInput" autocomplete="off" autocapitalize="words" enterkeyhint="search" inputmode="search" placeholder="Search destination, e.g. Bugis" aria-label="Search Singapore place" />
         <button type="submit">Go</button>
       </form>
       <div id="searchMsg" class="search-msg" aria-live="polite"></div>
 
+      <section id="recentSection" class="recent-section hidden">
+        <div class="section-label">RECENT DESTINATIONS</div>
+        <div id="recentGrid" class="recent-grid"></div>
+      </section>
+
+      <div class="section-label preset-label">POPULAR AREAS</div>
       <div id="presetGrid" class="preset-grid"></div>
 
       <div class="panel-foot">
         <span class="status-dot"></span>
-        <span>Real roads + building footprints · OpenStreetMap</span>
+        <span>OpenStreetMap world · OSRM route preview · Singapore only</span>
       </div>
     </aside>
 
     <section class="drive-hud" aria-label="Driving information">
       <div class="speed-readout"><span id="speed">0</span><small>km/h</small></div>
       <div id="gear" class="gear">D</div>
+      <div id="speedLimit" class="speed-limit hidden" aria-label="Speed limit">50</div>
       <div class="hud-meta">
         <strong id="roadName">Marina Bay</strong>
         <div class="hud-meta-line">
@@ -104,9 +143,9 @@
 
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
-    <footer class="attribution">Map data © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap contributors</a></footer>
+    <footer class="attribution"><a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">© OpenStreetMap</a><span id="routingCredit"></span></footer>
   </main>
 
-  <script src="boot.js?b=20260901b"></script>
+  <script src="boot.js?b=20260901mega"></script>
 </body>
 </html>

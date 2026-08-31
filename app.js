@@ -2,10 +2,18 @@
   'use strict';
 
   const SG_BOUNDS = { minLat: 1.16, maxLat: 1.456, minLon: 103.60, maxLon: 104.10 };
-  const OVERPASS_ENDPOINTS = [
-    'https://overpass-api.de/api/interpreter',
-    'https://overpass.kumi.systems/api/interpreter'
-  ];
+  const CONFIG = window.DRIVESG_CONFIG || {};
+  const OVERPASS_ENDPOINTS = Array.isArray(CONFIG.overpassEndpoints) && CONFIG.overpassEndpoints.length
+    ? CONFIG.overpassEndpoints
+    : ['https://overpass-api.de/api/interpreter','https://overpass.kumi.systems/api/interpreter'];
+  // External data providers are kept configurable so a managed/private backend can replace public demo services
+  // without rewriting the driving, navigation or UI layers.
+  const ROUTE_ENDPOINT = CONFIG.routeEndpoint || 'https://router.project-osrm.org/route/v1/driving';
+  const GEOCODE_ENDPOINT = CONFIG.geocodeEndpoint || 'https://nominatim.openstreetmap.org/search';
+  const ROUTE_OFFTRACK_METERS = 52;
+  const ROUTE_REROUTE_COOLDOWN = 11;
+  const ARRIVAL_METERS = 24;
+  const NAV_UPDATE_SECONDS = .14;
 
   const PRESETS = [
     { name: 'Marina Bay', subtitle: 'Skyline & waterfront', lat: 1.2829, lon: 103.8587 },
@@ -40,6 +48,10 @@
   const MAX_BUILDINGS = 950;
   const SIGNAL_RADIUS_METERS = 900;
   const MAX_TRAFFIC_SIGNALS = 140;
+  const MAX_CROSSINGS = 140;
+  const MAX_BUS_STOPS = 90;
+  const MAX_AMBIENT_TRAFFIC = 18;
+  const MINI_MAP_RANGE_DEFAULT = 360;
 
   let scene, camera, renderer, clock, sun, sunTarget, horizonHaze;
   let persistentWorld, dynamicWorld;
@@ -73,7 +85,22 @@
   let longitudinalVisual = 0;
   let tailLightMaterial = null;
   let lastRoadLabel = '';
+  let lastSpeedLimit = null;
+  let placeMode = 'navigate';
+  let miniMapHeadingUp = true;
+  let miniMapExpanded = false;
+  let lastMiniMapPaint = -Infinity;
+  let engineAudio = null;
+  let engineSoundOn = false;
+  let ambientTraffic = [];
+  let trafficMesh = null;
+  let trafficMaterial = null;
+  let currentWaterPolygons = [];
+  let currentParkPolygons = [];
+  let lastNavUpdate = -Infinity;
+  let navigation = makeEmptyNavigation();
   const mapCache = new Map();
+  const geocodeCache = new Map();
 
   const input = { gas: 0, brake: 0, steer: 0 };
   const shared = {};
@@ -84,12 +111,21 @@
     placesBtn: document.getElementById('placesBtn'),
     closePanelBtn: document.getElementById('closePanelBtn'),
     resetBtn: document.getElementById('resetBtn'),
+    soundBtn: document.getElementById('soundBtn'),
     nearMeBtn: document.getElementById('nearMeBtn'),
     randomBtn: document.getElementById('randomBtn'),
+    randomBtnLabel: document.getElementById('randomBtnLabel'),
+    navigateModeBtn: document.getElementById('navigateModeBtn'),
+    startModeBtn: document.getElementById('startModeBtn'),
+    panelTitle: document.getElementById('panelTitle'),
+    panelIntro: document.getElementById('panelIntro'),
+    placeEyebrow: document.getElementById('placeEyebrow'),
     searchForm: document.getElementById('searchForm'),
     searchInput: document.getElementById('searchInput'),
     searchMsg: document.getElementById('searchMsg'),
     presetGrid: document.getElementById('presetGrid'),
+    recentSection: document.getElementById('recentSection'),
+    recentGrid: document.getElementById('recentGrid'),
     locationName: document.getElementById('locationName'),
     mapDot: document.getElementById('mapDot'),
     speed: document.getElementById('speed'),
@@ -98,6 +134,21 @@
     roadName: document.getElementById('roadName'),
     tripDistance: document.getElementById('tripDistance'),
     topSpeed: document.getElementById('topSpeed'),
+    speedLimit: document.getElementById('speedLimit'),
+    navBanner: document.getElementById('navBanner'),
+    navArrow: document.getElementById('navArrow'),
+    navInstruction: document.getElementById('navInstruction'),
+    navTurnDistance: document.getElementById('navTurnDistance'),
+    navDestinationName: document.getElementById('navDestinationName'),
+    navRemaining: document.getElementById('navRemaining'),
+    navEta: document.getElementById('navEta'),
+    cancelNavBtn: document.getElementById('cancelNavBtn'),
+    miniMapCanvas: document.getElementById('miniMapCanvas'),
+    miniMapFooter: document.getElementById('miniMapFooter'),
+    compassLabel: document.getElementById('compassLabel'),
+    mapOrientationBtn: document.getElementById('mapOrientationBtn'),
+    mapExpandBtn: document.getElementById('mapExpandBtn'),
+    routingCredit: document.getElementById('routingCredit'),
     steerZone: document.getElementById('steerZone'),
     steerKnob: document.getElementById('steerKnob'),
     gasBtn: document.getElementById('gasBtn'),
@@ -111,10 +162,14 @@
     toast: document.getElementById('toast')
   };
 
-  function init() {
+  async function init() {
     if (!window.THREE) return;
     buildPresetButtons();
+    buildRecentDestinations();
     bindUi();
+    try{miniMapHeadingUp=localStorage.getItem('drivesg-map-heading-up')!=='0';}catch(_){}
+    els.mapOrientationBtn.textContent=miniMapHeadingUp?'↗':'N';
+    setPlaceMode('navigate');
     initThree();
     createCar();
     animate();
@@ -122,7 +177,9 @@
     const saved = readSavedPlace();
     const startingPlace = saved || PRESETS[0];
     setPanelOpen(true);
-    loadLocation(startingPlace, { keepPanelOpen: true });
+    await loadLocation(startingPlace, { keepPanelOpen: true });
+    const restore=readActiveDestination();
+    if(restore)navigateTo(restore,{quiet:true});
   }
 
   function initThree() {
@@ -202,6 +259,13 @@
     shared.signalRed = new THREE.MeshStandardMaterial({ color: 0x8e2c2f, emissive: 0x250506, emissiveIntensity: .55, roughness: .65 });
     shared.signalAmber = new THREE.MeshStandardMaterial({ color: 0xa98131, emissive: 0x211404, emissiveIntensity: .32, roughness: .65 });
     shared.signalGreen = new THREE.MeshStandardMaterial({ color: 0x3d7c57, emissive: 0x061d0e, emissiveIntensity: .32, roughness: .65 });
+    shared.busStopPole = new THREE.MeshStandardMaterial({ color: 0x545a5c, roughness: .9 });
+    shared.busStopSign = new THREE.MeshStandardMaterial({ color: 0x2d6e94, roughness: .72 });
+    shared.routeUnder = new THREE.MeshBasicMaterial({ color: 0x0a1417, transparent: true, opacity: .58, depthWrite: false, side: THREE.DoubleSide });
+    shared.route = new THREE.MeshBasicMaterial({ color: 0x73e2c4, transparent: true, opacity: .96, depthWrite: false, side: THREE.DoubleSide });
+    shared.routeArrow = new THREE.MeshBasicMaterial({ color: 0xe9fff7, transparent: true, opacity: .92, depthWrite: false, side: THREE.DoubleSide });
+    shared.destination = new THREE.MeshBasicMaterial({ color: 0x7af0ca, transparent: true, opacity: .72, depthWrite: false });
+    trafficMaterial = new THREE.MeshStandardMaterial({ color: 0x263238, metalness: .18, roughness: .54 });
   }
 
   function addHorizonHaze() {
@@ -274,6 +338,7 @@
   }
 
   async function loadLocation(place, options = {}) {
+    if(navigation.active||navigation.routeGroup)clearNavigation({quiet:true});
     const generation = ++streamGeneration;
     streamBusy = true;
     mapMode = 'live';
@@ -281,7 +346,10 @@
     origin = { lat: place.lat, lon: place.lon };
     currentLocationName = place.name || 'Singapore';
     els.locationName.textContent = currentLocationName;
+    els.placeEyebrow.textContent = 'DRIVING AROUND';
     els.searchMsg.textContent = '';
+    lastSpeedLimit=null;
+    els.speedLimit?.classList.add('hidden');
     speedMps = 0;
     resetSessionStats();
     input.gas = input.brake = input.steer = 0;
@@ -303,7 +371,7 @@
       setProgress(100, 'Ready to drive');
       setMapState('live');
       setTimeout(hideLoader, 220);
-      if (!options.keepPanelOpen) closePanel();
+      if (!options.keepPanelOpen) { setPlaceMode('navigate'); closePanel(); }
       showToast(`${built.roadCount} roads · ${built.buildingCount} real buildings loaded`);
     } catch (err) {
       console.warn('Live road data unavailable. Falling back to bundled Marina Bay demo.', err);
@@ -318,7 +386,7 @@
       setMapState('offline');
       setTimeout(hideLoader, 240);
       showToast('Demo roads loaded — live map request failed');
-      if (!options.keepPanelOpen) closePanel();
+      if (!options.keepPanelOpen) { setPlaceMode('navigate'); closePanel(); }
     } finally {
       if (generation === streamGeneration) streamBusy = false;
     }
@@ -336,6 +404,8 @@
       way["leisure"="park"](around:${SURFACE_RADIUS_METERS},${lat},${lon});
       way["landuse"~"^(grass|recreation_ground|meadow)$"](around:${SURFACE_RADIUS_METERS},${lat},${lon});
       node["highway"="traffic_signals"](around:${SIGNAL_RADIUS_METERS},${lat},${lon});
+      node["highway"="crossing"](around:${SIGNAL_RADIUS_METERS},${lat},${lon});
+      node["highway"="bus_stop"](around:${SIGNAL_RADIUS_METERS},${lat},${lon});
     );out geom;`;
 
     let lastError;
@@ -380,6 +450,645 @@
     };
   }
 
+
+  function makeEmptyNavigation() {
+    return {
+      active:false, mode:'idle', fetching:false, destination:null,
+      routeCoords:[], routeWorld:[], cumulativeM:[], totalM:0, durationS:0,
+      steps:[], progressM:0, remainingM:0, remainingS:0, nearestIndex:0,
+      nearestDistance:Infinity, routeGroup:null, lastRerouteAt:-Infinity,
+      lastInstructionKey:'', arrived:false
+    };
+  }
+
+  function currentCarCoords() {
+    return car ? unproject(car.position.x,car.position.z) : {lat:origin.lat,lon:origin.lon};
+  }
+
+  async function navigateTo(place, options={}) {
+    if(!place || !insideSingapore(Number(place.lat),Number(place.lon))) {
+      showToast('Choose a destination inside Singapore');
+      return;
+    }
+    const start=currentCarCoords();
+    const direct=haversineMeters(start.lat,start.lon,place.lat,place.lon);
+    if(direct<ARRIVAL_METERS*1.4){
+      showToast(`You are already near ${place.name}`);
+      return;
+    }
+    navigation.destination={name:place.name||'Destination',subtitle:place.subtitle||'',lat:Number(place.lat),lon:Number(place.lon)};
+    navigation.active=true;
+    navigation.arrived=false;
+    saveRecentDestination(navigation.destination);
+    saveActiveDestination(navigation.destination);
+    buildRecentDestinations();
+    closePanel();
+    await requestNavigationRoute(start,navigation.destination,{reroute:false,quiet:options.quiet});
+  }
+
+  async function requestNavigationRoute(start,destination,{reroute=false,quiet=false}={}) {
+    if(!destination)return;
+    navigation.fetching=true;
+    navigation.active=true;
+    navigation.mode=navigation.routeWorld.length?'route':'loading';
+    navigation.lastRerouteAt=clock?.elapsedTime||0;
+    els.navBanner.classList.add('show');
+    els.navBanner.classList.toggle('rerouting',reroute);
+    els.navArrow.textContent=reroute?'↻':'⌁';
+    els.navArrow.style.transform='none';
+    els.navInstruction.textContent=reroute?'Re-routing…':`Finding the best drive to ${destination.name}…`;
+    els.navTurnDistance.textContent='';
+    els.navDestinationName.textContent=destination.name;
+    els.navRemaining.textContent='—';
+    els.navEta.textContent='';
+
+    const controller=new AbortController();
+    const timeoutId=setTimeout(()=>controller.abort(),12000);
+    try{
+      const url=`${ROUTE_ENDPOINT}/${start.lon},${start.lat};${destination.lon},${destination.lat}?steps=true&geometries=geojson&overview=full&alternatives=false`;
+      const res=await fetch(url,{headers:{Accept:'application/json'},signal:controller.signal});
+      if(!res.ok)throw new Error(`Routing ${res.status}`);
+      const data=await res.json();
+      if(data?.code!=='Ok'||!data.routes?.length)throw new Error(data?.code||'No route');
+      applyRoute(data.routes[0],destination);
+      if(!quiet)showToast(`Route ready · ${formatDistance(navigation.totalM)} · ${formatEta(navigation.durationS)}`);
+    }catch(err){
+      console.warn('Drive route unavailable; using compass guidance.',err);
+      activateCompassGuidance(destination);
+      if(!quiet)showToast('Route service unavailable — compass guidance active');
+    }finally{
+      clearTimeout(timeoutId);
+      navigation.fetching=false;
+      els.navBanner.classList.remove('rerouting');
+    }
+  }
+
+  function applyRoute(route,destination) {
+    const coords=(route.geometry?.coordinates||[])
+      .map(c=>({lon:Number(c[0]),lat:Number(c[1])}))
+      .filter(c=>Number.isFinite(c.lat)&&Number.isFinite(c.lon));
+    if(coords.length<2)throw new Error('Route geometry missing');
+
+    navigation.destination={...destination};
+    navigation.routeCoords=coords;
+    navigation.routeWorld=coords.map(c=>project(c.lat,c.lon));
+    navigation.cumulativeM=[0];
+    let sum=0;
+    for(let i=1;i<coords.length;i++){
+      sum+=haversineMeters(coords[i-1].lat,coords[i-1].lon,coords[i].lat,coords[i].lon);
+      navigation.cumulativeM.push(sum);
+    }
+    navigation.totalM=Number(route.distance)||sum;
+    navigation.durationS=Math.max(1,Number(route.duration)||navigation.totalM/11);
+    navigation.progressM=0;
+    navigation.remainingM=navigation.totalM;
+    navigation.remainingS=navigation.durationS;
+    navigation.nearestIndex=0;
+    navigation.nearestDistance=0;
+    navigation.steps=[];
+    for(const leg of route.legs||[]) for(const step of leg.steps||[]) {
+      const loc=step?.maneuver?.location;
+      if(!Array.isArray(loc)||loc.length<2)continue;
+      const wp=project(Number(loc[1]),Number(loc[0]));
+      const progress=routeProgressForPoint(wp.x,wp.z,true).progressM;
+      navigation.steps.push({
+        progressM:progress,
+        distance:Number(step.distance)||0,
+        duration:Number(step.duration)||0,
+        name:step.name||'',
+        type:step.maneuver?.type||'continue',
+        modifier:step.maneuver?.modifier||'straight',
+        exit:step.maneuver?.exit||null,
+        bearingAfter:step.maneuver?.bearing_after
+      });
+    }
+    navigation.steps.sort((a,b)=>a.progressM-b.progressM);
+    navigation.mode='route';
+    navigation.active=true;
+    navigation.arrived=false;
+    navigation.lastInstructionKey='';
+    renderNavigationWorld();
+    els.routingCredit.textContent=' · routing by OSRM';
+    els.navBanner.classList.add('show');
+    updateNavigationUi(0);
+  }
+
+  function activateCompassGuidance(destination) {
+    disposeNavigationVisual();
+    navigation.mode='compass';
+    navigation.active=true;
+    navigation.destination={...destination};
+    navigation.routeCoords=[];
+    navigation.routeWorld=[];
+    navigation.cumulativeM=[];
+    const here=currentCarCoords();
+    navigation.totalM=haversineMeters(here.lat,here.lon,destination.lat,destination.lon);
+    navigation.remainingM=navigation.totalM;
+    navigation.durationS=0;
+    navigation.steps=[];
+    renderDestinationMarker();
+    els.routingCredit.textContent='';
+    els.navBanner.classList.add('show');
+    updateNavigationUi(0);
+  }
+
+  function clearNavigation({quiet=false}={}) {
+    disposeNavigationVisual();
+    navigation=makeEmptyNavigation();
+    clearActiveDestination();
+    els.navBanner.classList.remove('show','rerouting');
+    els.routingCredit.textContent='';
+    els.placeEyebrow.textContent='DRIVING AROUND';
+    els.locationName.textContent=currentLocationName;
+    if(!quiet)showToast('Navigation ended');
+  }
+
+  function disposeNavigationVisual() {
+    const group=navigation?.routeGroup;
+    if(!group)return;
+    scene?.remove(group);
+    group.traverse(obj=>{
+      obj.geometry?.dispose?.();
+      const mats=Array.isArray(obj.material)?obj.material:(obj.material?[obj.material]:[]);
+      mats.forEach(mat=>{
+        if(![shared.routeUnder,shared.route,shared.routeArrow,shared.destination].includes(mat))mat.dispose?.();
+      });
+    });
+    navigation.routeGroup=null;
+  }
+
+  function renderNavigationWorld() {
+    disposeNavigationVisual();
+    const group=new THREE.Group();
+    navigation.routeGroup=group;
+    if(navigation.routeWorld.length>1){
+      const under=[],line=[];
+      appendRoadRibbon(under,navigation.routeWorld,3.4,.078,false);
+      appendRoadRibbon(line,navigation.routeWorld,1.75,.104,false);
+      if(under.length){const m=meshFromFlatVertices(under,shared.routeUnder,false);m.renderOrder=8;group.add(m);}
+      if(line.length){const m=meshFromFlatVertices(line,shared.route,false);m.renderOrder=9;group.add(m);}
+      addRouteChevrons(group,navigation.routeWorld);
+    }
+    addDestinationMarkerTo(group);
+    scene.add(group);
+  }
+
+  function renderDestinationMarker() {
+    disposeNavigationVisual();
+    const group=new THREE.Group();
+    navigation.routeGroup=group;
+    addDestinationMarkerTo(group);
+    scene.add(group);
+  }
+
+  function addDestinationMarkerTo(group) {
+    if(!navigation.destination)return;
+    const p=project(navigation.destination.lat,navigation.destination.lon);
+    const ring=new THREE.Mesh(new THREE.TorusGeometry(3.8,.28,6,30),shared.destination);
+    ring.position.set(p.x,.18,p.z);ring.rotation.x=Math.PI/2;ring.renderOrder=11;group.add(ring);
+    const beam=new THREE.Mesh(new THREE.CylinderGeometry(.34,.34,16,8,1,true),shared.destination);
+    beam.position.set(p.x,8,p.z);beam.renderOrder=10;group.add(beam);
+  }
+
+  function addRouteChevrons(group,points) {
+    if(points.length<2)return;
+    const verts=[];
+    let walked=0,nextAt=55,count=0;
+    for(let i=0;i<points.length-1&&count<80;i++){
+      const a=points[i],b=points[i+1],dx=b.x-a.x,dz=b.z-a.z,len=Math.hypot(dx,dz);
+      if(len<.1)continue;
+      while(walked+len>=nextAt&&count<80){
+        const t=(nextAt-walked)/len,x=a.x+dx*t,z=a.z+dz*t,ux=dx/len,uz=dz/len,nx=-uz,nz=ux;
+        const tip=[x+ux*2.4,.118,z+uz*2.4],left=[x-ux*1.4+nx*1.25,.118,z-uz*1.4+nz*1.25],right=[x-ux*1.4-nx*1.25,.118,z-uz*1.4-nz*1.25];
+        pushTri(verts,tip,left,right);nextAt+=70;count++;
+      }
+      walked+=len;
+    }
+    if(verts.length){const mesh=meshFromFlatVertices(verts,shared.routeArrow,false);mesh.renderOrder=10;group.add(mesh);}
+  }
+
+  function updateNavigation(elapsed) {
+    if(!navigation.active||!navigation.destination)return;
+    if(elapsed-lastNavUpdate<NAV_UPDATE_SECONDS)return;
+    lastNavUpdate=elapsed;
+    const carCoords=currentCarCoords();
+    const directToDest=haversineMeters(carCoords.lat,carCoords.lon,navigation.destination.lat,navigation.destination.lon);
+
+    if(directToDest<ARRIVAL_METERS){
+      arriveAtDestination();
+      return;
+    }
+
+    if(navigation.mode==='route'&&navigation.routeWorld.length>1){
+      const hit=routeProgressForPoint(car.position.x,car.position.z,false);
+      navigation.nearestDistance=hit.distance;
+      navigation.nearestIndex=hit.index;
+      navigation.progressM=Math.max(navigation.progressM,hit.progressM-12);
+      navigation.remainingM=Math.max(0,navigation.totalM-navigation.progressM);
+      const ratio=navigation.totalM>0?navigation.remainingM/navigation.totalM:0;
+      navigation.remainingS=Math.max(0,navigation.durationS*ratio);
+
+      if(hit.distance>ROUTE_OFFTRACK_METERS&&!navigation.fetching&&elapsed-navigation.lastRerouteAt>ROUTE_REROUTE_COOLDOWN){
+        navigation.lastRerouteAt=elapsed;
+        requestNavigationRoute(carCoords,navigation.destination,{reroute:true,quiet:true});
+      }
+    }else{
+      navigation.remainingM=directToDest;
+      navigation.remainingS=0;
+    }
+    updateNavigationUi(directToDest);
+  }
+
+  function updateNavigationUi(directToDest=0) {
+    if(!navigation.active||!navigation.destination)return;
+    els.navBanner.classList.add('show');
+    els.navDestinationName.textContent=navigation.destination.name;
+    els.placeEyebrow.textContent='NAVIGATING TO';
+    els.locationName.textContent=navigation.destination.name;
+
+    if(navigation.mode==='route'){
+      const next=navigation.steps.find(step=>step.progressM>navigation.progressM+5);
+      const distToTurn=next?Math.max(0,next.progressM-navigation.progressM):navigation.remainingM;
+      const instruction=next?instructionForStep(next):`Continue to ${navigation.destination.name}`;
+      const glyph=next?maneuverGlyph(next):'↑';
+      els.navArrow.textContent=glyph;
+      els.navArrow.style.transform='none';
+      els.navInstruction.textContent=instruction;
+      els.navTurnDistance.textContent=formatDistance(distToTurn);
+      els.navRemaining.textContent=formatDistance(navigation.remainingM);
+      els.navEta.textContent=navigation.remainingS?formatEta(navigation.remainingS):'';
+      els.miniMapFooter.textContent=`${formatDistance(navigation.remainingM)} · ${navigation.destination.name}`;
+    }else{
+      const here=currentCarCoords();
+      const bearing=bearingDegrees(here.lat,here.lon,navigation.destination.lat,navigation.destination.lon);
+      const heading=headingDegreesFromYaw(car.rotation.y);
+      const relative=((bearing-heading+540)%360)-180;
+      els.navArrow.textContent='↑';
+      els.navArrow.style.transform=`rotate(${relative}deg)`;
+      els.navInstruction.textContent=`Head toward ${navigation.destination.name}`;
+      els.navTurnDistance.textContent=formatDistance(navigation.remainingM||directToDest);
+      els.navRemaining.textContent=formatDistance(navigation.remainingM||directToDest);
+      els.navEta.textContent='COMPASS';
+      els.miniMapFooter.textContent=`${formatDistance(navigation.remainingM||directToDest)} · ${navigation.destination.name}`;
+    }
+  }
+
+  function arriveAtDestination() {
+    if(navigation.arrived)return;
+    navigation.arrived=true;
+    navigation.active=false;
+    currentLocationName=navigation.destination.name;
+    savePlace({name:currentLocationName,subtitle:'Last destination',lat:navigation.destination.lat,lon:navigation.destination.lon});
+    clearActiveDestination();
+    speedMps*=.65;
+    els.navArrow.textContent='✓';
+    els.navArrow.style.transform='none';
+    els.navInstruction.textContent=`Arrived at ${navigation.destination.name}`;
+    els.navTurnDistance.textContent='';
+    els.navRemaining.textContent='ARRIVED';
+    els.navEta.textContent='';
+    els.placeEyebrow.textContent='ARRIVED';
+    setTimeout(()=>{if(navigation.arrived)clearNavigation({quiet:true});},5000);
+    showToast(`Arrived at ${navigation.destination.name}`);
+  }
+
+  function routeProgressForPoint(x,z,forceFull=false) {
+    const pts=navigation.routeWorld;
+    if(pts.length<2)return {distance:Infinity,progressM:0,index:0};
+    let start=0,end=pts.length-2;
+    if(!forceFull&&Number.isFinite(navigation.nearestIndex)){
+      start=Math.max(0,navigation.nearestIndex-70);
+      end=Math.min(pts.length-2,navigation.nearestIndex+120);
+    }
+    let best={distance:Infinity,progressM:0,index:0};
+    for(let i=start;i<=end;i++){
+      const a=pts[i],b=pts[i+1],vx=b.x-a.x,vz=b.z-a.z,len2=vx*vx+vz*vz||1;
+      const t=Math.max(0,Math.min(1,((x-a.x)*vx+(z-a.z)*vz)/len2));
+      const px=a.x+t*vx,pz=a.z+t*vz,d=Math.hypot(x-px,z-pz);
+      if(d<best.distance){
+        const c0=navigation.cumulativeM[i]||0,c1=navigation.cumulativeM[i+1]??c0;
+        best={distance:d,progressM:c0+(c1-c0)*t,index:i};
+      }
+    }
+    if(!forceFull&&best.distance>120){
+      navigation.nearestIndex=0;
+      return routeProgressForPoint(x,z,true);
+    }
+    return best;
+  }
+
+  function instructionForStep(step) {
+    const name=step.name?` ${step.name}`:'';
+    const mod=String(step.modifier||'straight').replace('_',' ');
+    if(step.type==='arrive')return 'Arrive at your destination';
+    if(step.type==='depart')return `Start ${mod}${name?` on${name}`:''}`;
+    if(step.type==='roundabout'||step.type==='rotary')return step.exit?`At the roundabout, take exit ${step.exit}${name?` onto${name}`:''}`:`Enter the roundabout${name?` toward${name}`:''}`;
+    if(step.type==='merge')return `Merge ${mod}${name?` onto${name}`:''}`;
+    if(step.type==='on ramp'||step.type==='off ramp')return `Take the ${mod} ramp${name?` onto${name}`:''}`;
+    if(step.type==='fork')return `Keep ${mod}${name?` onto${name}`:''}`;
+    if(step.type==='turn')return `Turn ${mod}${name?` onto${name}`:''}`;
+    if(step.type==='new name')return `Continue${name?` onto${name}`:''}`;
+    if(step.type==='end of road')return `At the end, turn ${mod}${name?` onto${name}`:''}`;
+    return `Continue ${mod}${name?` on${name}`:''}`.replace('Continue straight on','Continue on');
+  }
+
+  function maneuverGlyph(step) {
+    const type=step.type||'',mod=step.modifier||'straight';
+    if(type==='arrive')return '✓';
+    if(type==='roundabout'||type==='rotary')return '⟳';
+    if(/u-?turn/.test(mod))return '↶';
+    if(/sharp right/.test(mod))return '↘';
+    if(/slight right/.test(mod))return '↗';
+    if(/right/.test(mod))return '→';
+    if(/sharp left/.test(mod))return '↙';
+    if(/slight left/.test(mod))return '↖';
+    if(/left/.test(mod))return '←';
+    return '↑';
+  }
+
+  function haversineMeters(lat1,lon1,lat2,lon2) {
+    const R=6371000,toRad=Math.PI/180;
+    const p1=lat1*toRad,p2=lat2*toRad,dLat=(lat2-lat1)*toRad,dLon=(lon2-lon1)*toRad;
+    const a=Math.sin(dLat/2)**2+Math.cos(p1)*Math.cos(p2)*Math.sin(dLon/2)**2;
+    return R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
+  }
+
+  function bearingDegrees(lat1,lon1,lat2,lon2) {
+    const r=Math.PI/180,p1=lat1*r,p2=lat2*r,dLon=(lon2-lon1)*r;
+    const y=Math.sin(dLon)*Math.cos(p2),x=Math.cos(p1)*Math.sin(p2)-Math.sin(p1)*Math.cos(p2)*Math.cos(dLon);
+    return (Math.atan2(y,x)*180/Math.PI+360)%360;
+  }
+
+  function formatDistance(meters) {
+    const m=Math.max(0,Number(meters)||0);
+    if(m<1000)return m<100?`${Math.round(m/10)*10} m`:`${Math.round(m/50)*50} m`;
+    return `${(m/1000).toFixed(m<10000?1:0)} km`;
+  }
+
+  function formatEta(seconds) {
+    const s=Math.max(0,Number(seconds)||0),mins=Math.max(1,Math.round(s/60));
+    if(mins<60)return `${mins} min`;
+    const h=Math.floor(mins/60),m=mins%60;
+    return m?`${h} h ${m} min`:`${h} h`;
+  }
+
+
+  function setPlaceMode(mode) {
+    placeMode=mode==='start'?'start':'navigate';
+    const nav=placeMode==='navigate';
+    els.navigateModeBtn.classList.toggle('active',nav);
+    els.startModeBtn.classList.toggle('active',!nav);
+    els.panelTitle.textContent=nav?'Where do you want to go?':'Where do you want to start?';
+    els.panelIntro.textContent=nav
+      ?`You are driving around ${currentLocationName}. Pick a destination and DriveSG will guide you there; “Start here” teleports to a new starting area.`
+      :'Choose a Singapore area to spawn on a nearby real road. Any active navigation will end.';
+    els.searchInput.placeholder=nav?'Search destination, e.g. Bugis':'Search starting area, e.g. Bishan';
+    els.randomBtnLabel.textContent=nav?'Random destination':'Random start';
+  }
+
+  function handlePlaceChoice(place) {
+    if(placeMode==='navigate')navigateTo(place);
+    else{
+      clearNavigation({quiet:true});
+      loadLocation(place);
+    }
+  }
+
+  function saveActiveDestination(place) {
+    try{localStorage.setItem('drivesg-active-destination',JSON.stringify({...place,savedAt:Date.now()}));}catch(_){}
+  }
+
+  function readActiveDestination() {
+    try{
+      const p=JSON.parse(localStorage.getItem('drivesg-active-destination')||'null');
+      if(!p||Date.now()-Number(p.savedAt||0)>3*60*60*1000||!insideSingapore(Number(p.lat),Number(p.lon))){clearActiveDestination();return null;}
+      return p;
+    }catch(_){return null;}
+  }
+
+  function clearActiveDestination(){try{localStorage.removeItem('drivesg-active-destination');}catch(_){}}
+
+  function saveRecentDestination(place) {
+    try{
+      const current=readRecentDestinations().filter(p=>Math.hypot(p.lat-place.lat,p.lon-place.lon)>.00015);
+      current.unshift({name:place.name,subtitle:place.subtitle||'',lat:Number(place.lat),lon:Number(place.lon)});
+      localStorage.setItem('drivesg-recent-destinations',JSON.stringify(current.slice(0,4)));
+    }catch(_){}
+  }
+
+  function readRecentDestinations() {
+    try{
+      const a=JSON.parse(localStorage.getItem('drivesg-recent-destinations')||'[]');
+      return Array.isArray(a)?a.filter(p=>p&&insideSingapore(Number(p.lat),Number(p.lon))).slice(0,4):[];
+    }catch(_){return [];}
+  }
+
+  function buildRecentDestinations() {
+    if(!els.recentGrid||!els.recentSection)return;
+    const recent=readRecentDestinations();
+    els.recentGrid.innerHTML='';
+    els.recentSection.classList.toggle('hidden',!recent.length);
+    recent.forEach(place=>{
+      const btn=document.createElement('button');btn.type='button';btn.textContent=place.name;
+      btn.addEventListener('click',()=>{setPlaceMode('navigate');navigateTo(place);});
+      els.recentGrid.appendChild(btn);
+    });
+  }
+
+  function ensureMiniMapResolution() {
+    const c=els.miniMapCanvas;if(!c)return;
+    const rect=c.getBoundingClientRect(),ratio=Math.min(window.devicePixelRatio||1,2);
+    const w=Math.max(240,Math.round(rect.width*ratio)),h=Math.max(180,Math.round(rect.height*ratio));
+    if(c.width!==w||c.height!==h){c.width=w;c.height=h;}
+  }
+
+  function paintMiniMap(elapsed) {
+    if(!els.miniMapCanvas||!car||elapsed-lastMiniMapPaint<.11)return;
+    lastMiniMapPaint=elapsed;
+    ensureMiniMapResolution();
+    const c=els.miniMapCanvas,ctx=c.getContext('2d');if(!ctx)return;
+    const w=c.width,h=c.height,cx=w/2,cy=h*.53;
+    const yaw=car.rotation.y,fx=Math.sin(yaw),fz=Math.cos(yaw),rx=Math.cos(yaw),rz=-Math.sin(yaw);
+    let mapCenterX=car.position.x,mapCenterZ=car.position.z;
+    let range=navigation.active?THREE.MathUtils.clamp(Math.max(260,Math.min(470,navigation.remainingM*.16)),260,470):MINI_MAP_RANGE_DEFAULT;
+    let scale=Math.min(w,h)/(range*2);
+    let overviewNorthUp=false;
+    if(miniMapExpanded&&navigation.active&&navigation.routeWorld.length>1){
+      const pts=[...navigation.routeWorld,{x:car.position.x,z:car.position.z}];
+      let minX=Infinity,maxX=-Infinity,minZ=Infinity,maxZ=-Infinity;
+      for(const p of pts){minX=Math.min(minX,p.x);maxX=Math.max(maxX,p.x);minZ=Math.min(minZ,p.z);maxZ=Math.max(maxZ,p.z);}
+      mapCenterX=(minX+maxX)/2;mapCenterZ=(minZ+maxZ)/2;
+      const spanX=Math.max(220,maxX-minX),spanZ=Math.max(220,maxZ-minZ);
+      scale=Math.min(w/(spanX*1.18),h/(spanZ*1.18));
+      range=Math.max(spanX,spanZ)*.62;overviewNorthUp=true;
+    }
+    const toScreen=(x,z)=>{
+      const dx=x-mapCenterX,dz=z-mapCenterZ;
+      if(miniMapHeadingUp&&!overviewNorthUp)return {x:cx+(dx*rx+dz*rz)*scale,y:cy-(dx*fx+dz*fz)*scale};
+      return {x:cx+dx*scale,y:cy+dz*scale};
+    };
+    const near=(x,z,pad=1.25)=>Math.abs(x-mapCenterX)<range*pad&&Math.abs(z-mapCenterZ)<range*pad;
+
+    ctx.clearRect(0,0,w,h);
+    ctx.fillStyle='#142126';ctx.fillRect(0,0,w,h);
+
+    const drawPoly=(pts,fill)=>{
+      if(!pts?.length)return;
+      const center=pts.reduce((a,p)=>({x:a.x+p.x/pts.length,z:a.z+p.z/pts.length}),{x:0,z:0});
+      if(!near(center.x,center.z,1.5))return;
+      ctx.beginPath();pts.forEach((p,i)=>{const q=toScreen(p.x,p.z);i?ctx.lineTo(q.x,q.y):ctx.moveTo(q.x,q.y);});ctx.closePath();ctx.fillStyle=fill;ctx.fill();
+    };
+    for(const pts of currentParkPolygons)drawPoly(pts,'#31463b');
+    for(const pts of currentWaterPolygons)drawPoly(pts,'#264856');
+
+    let buildingDrawn=0;
+    for(const b of buildingColliders){
+      if(buildingDrawn>260)break;
+      if(!near(b.x,b.z,1.15))continue;
+      drawPoly(b.pts,'#566167');buildingDrawn++;
+    }
+
+    ctx.lineCap='round';
+    for(const seg of roadSegments){
+      const mx=(seg.ax+seg.bx)/2,mz=(seg.az+seg.bz)/2;if(!near(mx,mz,1.25))continue;
+      const a=toScreen(seg.ax,seg.az),b=toScreen(seg.bx,seg.bz);
+      ctx.beginPath();ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);
+      ctx.strokeStyle=seg.major?'#a0aaa8':'#7d8988';ctx.lineWidth=Math.max(1.2,Math.min(5.5,seg.width*scale*.82));ctx.stroke();
+    }
+
+    if(navigation.active&&navigation.routeWorld.length>1){
+      ctx.beginPath();let begun=false;
+      for(const p of navigation.routeWorld){
+        if(!near(p.x,p.z,1.7)&&begun)continue;
+        const q=toScreen(p.x,p.z);if(!begun){ctx.moveTo(q.x,q.y);begun=true;}else ctx.lineTo(q.x,q.y);
+      }
+      ctx.strokeStyle='#72e7c6';ctx.lineWidth=Math.max(3,4.5*scale);ctx.shadowColor='rgba(114,231,198,.45)';ctx.shadowBlur=7;ctx.stroke();ctx.shadowBlur=0;
+    }
+
+    for(const agent of ambientTraffic){
+      if(!near(agent.x,agent.z))continue;const q=toScreen(agent.x,agent.z);
+      ctx.fillStyle='#d8c36b';ctx.fillRect(q.x-1.5,q.y-2.5,3,5);
+    }
+
+    if(navigation.active&&navigation.destination){
+      const d=project(navigation.destination.lat,navigation.destination.lon);
+      const dx=d.x-car.position.x,dz=d.z-car.position.z,dist=Math.hypot(dx,dz);
+      if(overviewNorthUp||dist<range*.88){
+        const q=toScreen(d.x,d.z);ctx.beginPath();ctx.arc(q.x,q.y,7,0,Math.PI*2);ctx.fillStyle='#7af0ca';ctx.fill();ctx.lineWidth=3;ctx.strokeStyle='#0b1716';ctx.stroke();
+      }else{
+        let right,forward;
+        if(miniMapHeadingUp&&!overviewNorthUp){right=dx*rx+dz*rz;forward=dx*fx+dz*fz;}
+        else{right=dx;forward=-dz;}
+        const angle=Math.atan2(right,forward),r=Math.min(w,h)*.37;
+        const qx=cx+Math.sin(angle)*r,qy=cy-Math.cos(angle)*r;
+        ctx.save();ctx.translate(qx,qy);ctx.rotate(angle);ctx.beginPath();ctx.moveTo(0,-9);ctx.lineTo(6,6);ctx.lineTo(-6,6);ctx.closePath();ctx.fillStyle='#7af0ca';ctx.fill();ctx.restore();
+      }
+    }
+
+    const carMapPos=overviewNorthUp?toScreen(car.position.x,car.position.z):{x:cx,y:cy};
+    ctx.save();ctx.translate(carMapPos.x,carMapPos.y);
+    if(!miniMapHeadingUp||overviewNorthUp)ctx.rotate(headingDegreesFromYaw(yaw)*Math.PI/180);
+    ctx.beginPath();ctx.moveTo(0,-10);ctx.lineTo(6,7);ctx.lineTo(0,4);ctx.lineTo(-6,7);ctx.closePath();ctx.fillStyle='#ffffff';ctx.fill();ctx.strokeStyle='#0c1518';ctx.lineWidth=2;ctx.stroke();ctx.restore();
+
+    els.compassLabel.textContent=overviewNorthUp?'ROUTE · NORTH':(miniMapHeadingUp?headingCardinal(yaw):'NORTH');
+    if(!navigation.active)els.miniMapFooter.textContent=lastRoadLabel||currentLocationName;
+  }
+
+  function toggleMiniMapExpanded(){
+    miniMapExpanded=!miniMapExpanded;
+    els.miniMapCard.classList.toggle('expanded',miniMapExpanded);
+    document.body.classList.toggle('map-expanded',miniMapExpanded);
+    els.mapExpandBtn.textContent=miniMapExpanded?'×':'⛶';
+    els.mapExpandBtn.setAttribute('aria-label',miniMapExpanded?'Close route map':'Expand route map');
+    clearInputs();
+    lastMiniMapPaint=-Infinity;
+  }
+
+  function headingDegreesFromYaw(yaw) {
+    const east=Math.sin(yaw),north=-Math.cos(yaw);
+    return (Math.atan2(east,north)*180/Math.PI+360)%360;
+  }
+
+  function headingCardinal(yaw) {
+    const deg=headingDegreesFromYaw(yaw);
+    const dirs=['N','NE','E','SE','S','SW','W','NW'];
+    return dirs[Math.round(deg/45)%8];
+  }
+
+  function createAmbientTraffic(group,segments) {
+    ambientTraffic=[];trafficMesh=null;
+    const eligible=segments.filter(s=>Math.hypot(s.bx-s.ax,s.bz-s.az)>26&&!/service|living_street/.test(s.type||''));
+    if(!eligible.length||!group)return;
+    const count=Math.min(MAX_AMBIENT_TRAFFIC,Math.max(8,Math.floor(eligible.length/24)));
+    const geo=new THREE.BoxGeometry(1.68,.68,3.65);
+    trafficMesh=new THREE.InstancedMesh(geo,trafficMaterial,count);
+    trafficMesh.castShadow=false;trafficMesh.receiveShadow=false;
+    const palette=[0x263238,0xd6d9d6,0x7d292c,0x244a62,0xb7a56b];
+    for(let i=0;i<count;i++){
+      const seg=eligible[Math.floor(pseudoRandom(i*41+13)*eligible.length)];
+      const oneway=String(seg.oneway||'');
+      const dir=oneway==='-1'?-1:(/^(yes|1)$/.test(oneway)?1:(pseudoRandom(i*17+4)>.5?1:-1));
+      ambientTraffic.push({seg,t:dir>0?pseudoRandom(i*23+7):1-pseudoRandom(i*23+7),dir,speed:5.5+pseudoRandom(i*31+2)*8.5,x:0,z:0});
+      trafficMesh.setColorAt(i,new THREE.Color(palette[i%palette.length]));
+    }
+    trafficMesh.instanceColor.needsUpdate=true;group.add(trafficMesh);updateAmbientTraffic(0);
+  }
+
+  function updateAmbientTraffic(dt) {
+    if(!trafficMesh||!ambientTraffic.length)return;
+    const m=new THREE.Matrix4(),pos=new THREE.Vector3(),quat=new THREE.Quaternion(),scale=new THREE.Vector3(1,1,1);
+    ambientTraffic.forEach((a,i)=>{
+      let seg=a.seg,dx=seg.bx-seg.ax,dz=seg.bz-seg.az,len=Math.hypot(dx,dz)||1;
+      if(dt>0)a.t+=a.dir*(a.speed/len)*dt;
+      if(a.t>1||a.t<0){
+        const candidates=roadSegments.filter(s=>Math.hypot(s.bx-s.ax,s.bz-s.az)>28&&!/service|living_street/.test(s.type||''));
+        if(candidates.length){
+          seg=a.seg=candidates[Math.floor(Math.random()*candidates.length)];dx=seg.bx-seg.ax;dz=seg.bz-seg.az;len=Math.hypot(dx,dz)||1;
+          const oneway=String(seg.oneway||'');a.dir=oneway==='-1'?-1:(/^(yes|1)$/.test(oneway)?1:(Math.random()>.5?1:-1));
+          a.t=a.dir>0?0:1;a.speed=5.5+Math.random()*8.5;
+        }else a.t=Math.max(0,Math.min(1,a.t));
+      }
+      const ux=dx/len,uz=dz/len,nx=-uz,nz=ux;
+      const laneOffset=Math.min(2.25,Math.max(.75,seg.width*.22))*a.dir;
+      a.x=seg.ax+dx*a.t+nx*laneOffset;a.z=seg.az+dz*a.t+nz*laneOffset;
+      const yaw=Math.atan2(dx*a.dir,dz*a.dir);
+      pos.set(a.x,.43,a.z);quat.setFromAxisAngle(new THREE.Vector3(0,1,0),yaw);m.compose(pos,quat,scale);trafficMesh.setMatrixAt(i,m);
+    });
+    trafficMesh.instanceMatrix.needsUpdate=true;
+  }
+
+  function carHitsTraffic(x,z) {
+    for(const a of ambientTraffic)if(Math.hypot(x-a.x,z-a.z)<2.25)return true;
+    return false;
+  }
+
+  function toggleEngineSound() {
+    engineSoundOn=!engineSoundOn;
+    if(engineSoundOn)ensureEngineAudio();
+    els.soundBtn.classList.toggle('sound-on',engineSoundOn);
+    els.soundBtn.textContent='♪';
+    updateEngineAudio();
+  }
+
+  function ensureEngineAudio() {
+    if(engineAudio){engineAudio.ctx.resume?.();return;}
+    try{
+      const AC=window.AudioContext||window.webkitAudioContext;if(!AC)return;
+      const ctx=new AC(),osc=ctx.createOscillator(),filter=ctx.createBiquadFilter(),gain=ctx.createGain();
+      osc.type='sawtooth';osc.frequency.value=55;filter.type='lowpass';filter.frequency.value=520;filter.Q.value=.7;gain.gain.value=.0001;
+      osc.connect(filter);filter.connect(gain);gain.connect(ctx.destination);osc.start();
+      engineAudio={ctx,osc,filter,gain};
+    }catch(err){console.warn('Engine audio unavailable',err);engineSoundOn=false;}
+  }
+
+  function updateEngineAudio() {
+    if(!engineAudio)return;
+    const now=engineAudio.ctx.currentTime,target=engineSoundOn ? .028 : .0001;
+    engineAudio.gain.gain.cancelScheduledValues(now);engineAudio.gain.gain.linearRampToValueAtTime(target,now+.08);
+    const rev=55+Math.abs(speedMps)*5.4+input.gas*18;
+    engineAudio.osc.frequency.setTargetAtTime(rev,now,.06);engineAudio.filter.frequency.setTargetAtTime(430+Math.abs(speedMps)*28,now,.08);
+  }
+
   function buildWorld(data, center = {}) {
     const centerX = Number.isFinite(center.x) ? center.x : (Number.isFinite(center.centerX) ? center.centerX : 0);
     const centerZ = Number.isFinite(center.z) ? center.z : (Number.isFinite(center.centerZ) ? center.centerZ : 0);
@@ -395,16 +1104,21 @@
     const buildingVerts = [[], [], [], []];
     const buildingDescriptors = [];
     const signalPoints = [];
+    const crossingPoints = [];
+    const busStopPoints = [];
+    const waterPolygons = [];
+    const parkPolygons = [];
     let roadCount = 0;
     let waterCount = 0;
     let parkCount = 0;
 
     for (const el of data.elements) {
       const tags = el.tags || {};
-      if (el.type==='node' && tags.highway==='traffic_signals' && Number.isFinite(el.lat) && Number.isFinite(el.lon)) {
-        const p=project(el.lat,el.lon);
-        if(Math.hypot(p.x-centerX,p.z-centerZ)<=SIGNAL_RADIUS_METERS+80 && signalPoints.length<MAX_TRAFFIC_SIGNALS) signalPoints.push(p);
-        continue;
+      if (el.type==='node' && Number.isFinite(el.lat) && Number.isFinite(el.lon)) {
+        const p=project(el.lat,el.lon),dist=Math.hypot(p.x-centerX,p.z-centerZ);
+        if(tags.highway==='traffic_signals'&&dist<=SIGNAL_RADIUS_METERS+80&&signalPoints.length<MAX_TRAFFIC_SIGNALS){signalPoints.push(p);continue;}
+        if(tags.highway==='crossing'&&dist<=SIGNAL_RADIUS_METERS+80&&crossingPoints.length<MAX_CROSSINGS){crossingPoints.push(p);continue;}
+        if(tags.highway==='bus_stop'&&dist<=SIGNAL_RADIUS_METERS+80&&busStopPoints.length<MAX_BUS_STOPS){busStopPoints.push(p);continue;}
       }
       if (!Array.isArray(el.geometry) || el.geometry.length < 2) continue;
 
@@ -428,9 +1142,10 @@
           const length = Math.hypot(dx, dz);
           if (length < .6 || length > 1500) continue;
           const seg = {
-            ax:a.x, az:a.z, bx:b.x, bz:b.z, width, major, lanes,
+            ax:a.x, az:a.z, bx:b.x, bz:b.z, width, major, lanes, type,
             oneway: tags.oneway || '',
-            name: roadDisplayName(tags)
+            name: roadDisplayName(tags),
+            speedLimit: parseSpeedLimit(tags.maxspeed)
           };
           segments.push(seg);
           waySegments.push(seg);
@@ -442,10 +1157,10 @@
         if (b) buildingDescriptors.push(b);
       } else if (isWaterFeature(tags)) {
         const pts = cleanPolygon(el.geometry.map(p => project(p.lat, p.lon)));
-        if (appendFlatPolygon(waterVerts, pts, 0.004)) waterCount++;
+        if (appendFlatPolygon(waterVerts, pts, 0.004)) { waterCount++; waterPolygons.push(pts); }
       } else if (isParkFeature(tags)) {
         const pts = cleanPolygon(el.geometry.map(p => project(p.lat, p.lon)));
-        if (appendFlatPolygon(parkVerts, pts, -0.002)) parkCount++;
+        if (appendFlatPolygon(parkVerts, pts, -0.002)) { parkCount++; parkPolygons.push(pts); }
       }
     }
 
@@ -479,12 +1194,15 @@
     });
 
     const trafficSignalCount = addTrafficSignals(group, signalPoints);
+    const crossingCount = addPedestrianCrossings(group,crossingPoints,segments);
+    const busStopCount = addBusStops(group,busStopPoints);
     const treeCount = addRoadsideTrees(group, segments, centerX, centerZ, selectedBuildings);
     return {
       group, segments, roadCount,
       buildingCount: selectedBuildings.length,
       buildingColliders: selectedBuildings,
-      treeCount, waterCount, parkCount, trafficSignalCount
+      waterPolygons, parkPolygons,
+      treeCount, waterCount, parkCount, trafficSignalCount, crossingCount, busStopCount
     };
   }
 
@@ -655,6 +1373,45 @@
     return count;
   }
 
+  function addPedestrianCrossings(group,points,segments) {
+    if(!points.length||!segments.length)return 0;
+    const verts=[];let count=0;
+    for(const p of points){
+      let best=null;
+      for(const seg of segments){
+        if(Math.abs(((seg.ax+seg.bx)/2)-p.x)>55||Math.abs(((seg.az+seg.bz)/2)-p.z)>55)continue;
+        const hit=closestPointOnSegment(p.x,p.z,seg);if(!best||hit.dist<best.dist)best={...hit,seg};
+      }
+      if(!best||best.dist>12)continue;
+      const seg=best.seg,dx=seg.bx-seg.ax,dz=seg.bz-seg.az,len=Math.hypot(dx,dz)||1,ux=dx/len,uz=dz/len,nx=-uz,nz=ux;
+      const halfAcross=Math.max(2.1,seg.width*.43),stripeHalf=.23;
+      for(let k=-2;k<=2;k++){
+        const along=k*1.05,cx=best.x+ux*along,cz=best.z+uz*along;
+        const a=[cx+nx*halfAcross+ux*stripeHalf,.067,cz+nz*halfAcross+uz*stripeHalf];
+        const b=[cx-nx*halfAcross+ux*stripeHalf,.067,cz-nz*halfAcross+uz*stripeHalf];
+        const c=[cx-nx*halfAcross-ux*stripeHalf,.067,cz-nz*halfAcross-uz*stripeHalf];
+        const d=[cx+nx*halfAcross-ux*stripeHalf,.067,cz+nz*halfAcross-uz*stripeHalf];
+        pushTri(verts,a,b,c);pushTri(verts,a,c,d);
+      }
+      count++;if(count>=MAX_CROSSINGS)break;
+    }
+    if(verts.length){const mesh=meshFromFlatVertices(verts,shared.line,false);mesh.renderOrder=5;group.add(mesh);}
+    return count;
+  }
+
+  function addBusStops(group,points) {
+    const count=Math.min(points.length,MAX_BUS_STOPS);if(!count)return 0;
+    const poleGeo=new THREE.CylinderGeometry(.055,.07,2.35,6),signGeo=new THREE.BoxGeometry(.55,.42,.10);
+    const poles=new THREE.InstancedMesh(poleGeo,shared.busStopPole,count),signs=new THREE.InstancedMesh(signGeo,shared.busStopSign,count);
+    const m=new THREE.Matrix4(),pos=new THREE.Vector3(),quat=new THREE.Quaternion(),scale=new THREE.Vector3(1,1,1);
+    for(let i=0;i<count;i++){
+      const p=points[i];pos.set(p.x,1.175,p.z);m.compose(pos,quat,scale);poles.setMatrixAt(i,m);
+      pos.set(p.x,2.15,p.z);m.compose(pos,quat,scale);signs.setMatrixAt(i,m);
+    }
+    [poles,signs].forEach(mesh=>{mesh.instanceMatrix.needsUpdate=true;mesh.castShadow=false;mesh.receiveShadow=false;group.add(mesh);});
+    return count;
+  }
+
   function addRoadsideTrees(group, segments, centerX, centerZ, buildings=[]) {
     const trees=[];
     const maxTrees=190;
@@ -813,6 +1570,15 @@
     return n;
   }
 
+  function parseSpeedLimit(value) {
+    if(value==null)return null;
+    const raw=String(value).trim().toLowerCase();
+    if(!raw||raw==='none'||raw==='signals'||raw==='variable')return null;
+    const n=Number.parseFloat(raw);
+    if(!Number.isFinite(n)||n<=0||n>200)return null;
+    return /mph/.test(raw)?Math.round(n*1.60934):Math.round(n);
+  }
+
   function widthForRoad(tags) {
     const explicit=parseMeasureMeters(tags.width);
     if(Number.isFinite(explicit)&&explicit>=2&&explicit<=30)return explicit;
@@ -874,7 +1640,7 @@
     roads.forEach((line,idx)=>{
       const points=line.map(([x,z])=>({x,z}));
       for(let i=0;i<points.length-1;i++){
-        const seg={ax:points[i].x,az:points[i].z,bx:points[i+1].x,bz:points[i+1].z,width:idx<4?9.5:7,major:idx<4,oneway:'',name:'DriveSG demo road'};
+        const seg={ax:points[i].x,az:points[i].z,bx:points[i+1].x,bz:points[i+1].z,width:idx<4?9.5:7,major:idx<4,lanes:2,type:idx<4?'primary':'residential',oneway:'',name:'DriveSG demo road',speedLimit:50};
         segments.push(seg); appendRoadQuad(roadVerts,seg,.025); if(idx<4)appendCenterDashes(lineVerts,seg);
       }
     });
@@ -891,9 +1657,14 @@
     const m=new THREE.Matrix4(),pos=new THREE.Vector3(),quat=new THREE.Quaternion(),scale=new THREE.Vector3();
     boxes.forEach((b,i)=>{pos.set(b.x,b.h/2,b.z);scale.set(b.w,b.h,b.d);m.compose(pos,quat,scale);inst.setMatrixAt(i,m);});
     inst.instanceMatrix.needsUpdate=true; group.add(inst);
-    const treeCount=addRoadsideTrees(group,segments,0,0);
+    const fallbackColliders=boxes.map((b,i)=>({
+      ...b,minHeight:0,bucket:0,distance:Math.hypot(b.x,b.z),
+      pts:[{x:b.x-b.w/2,z:b.z-b.d/2},{x:b.x+b.w/2,z:b.z-b.d/2},{x:b.x+b.w/2,z:b.z+b.d/2},{x:b.x-b.w/2,z:b.z+b.d/2}],
+      bounds:{minX:b.x-b.w/2,maxX:b.x+b.w/2,minZ:b.z-b.d/2,maxZ:b.z+b.d/2}
+    }));
+    const treeCount=addRoadsideTrees(group,segments,0,0,fallbackColliders);
     addLandmarksTo(group,0,0);
-    return {group,segments,roadCount:roads.length,buildingCount:boxes.length,treeCount};
+    return {group,segments,roadCount:roads.length,buildingCount:boxes.length,buildingColliders:fallbackColliders,waterPolygons:[],parkPolygons:[],treeCount};
   }
 
   function swapDynamicWorld(built) {
@@ -902,14 +1673,17 @@
     scene.add(dynamicWorld);
     roadSegments=built.segments;
     buildingColliders=built.buildingColliders||[];
+    currentWaterPolygons=built.waterPolygons||[];
+    currentParkPolygons=built.parkPolygons||[];
     rebuildRoadIndex();
     rebuildBuildingIndex();
+    createAmbientTraffic(dynamicWorld,roadSegments);
     if(previous){scene.remove(previous);disposeWorldGroup(previous);}
     console.info(`DriveSG world: ${built.roadCount} road ways, ${built.buildingCount} buildings, ${built.trafficSignalCount||0} traffic signals, ${built.treeCount||0} trees, ${built.segments.length} road segments`);
   }
 
   function disposeWorldGroup(group) {
-    const retained = new Set([shared.roadEdge, shared.road, shared.majorRoad, shared.line, shared.water, shared.park, shared.treeTrunk, shared.treeLeaf, shared.signalPole, shared.signalHead, shared.signalRed, shared.signalAmber, shared.signalGreen, ...shared.buildings]);
+    const retained = new Set([shared.roadEdge, shared.road, shared.majorRoad, shared.line, shared.water, shared.park, shared.treeTrunk, shared.treeLeaf, shared.signalPole, shared.signalHead, shared.signalRed, shared.signalAmber, shared.signalGreen, shared.busStopPole, shared.busStopSign, trafficMaterial, ...shared.buildings]);
     group.traverse(obj=>{
       if(obj.geometry) obj.geometry.dispose?.();
       const mats = Array.isArray(obj.material) ? obj.material : (obj.material ? [obj.material] : []);
@@ -1091,7 +1865,7 @@
     car.position.x+=fx*speedMps*dt;
     car.position.z+=fz*speedMps*dt;
 
-    if(carHitsBuilding(car.position.x,car.position.z)){
+    if(carHitsBuilding(car.position.x,car.position.z)||carHitsTraffic(car.position.x,car.position.z)){
       car.position.x=beforeX;
       car.position.z=beforeZ;
       speedMps*=-.08;
@@ -1120,12 +1894,21 @@
         lastRoadLabel=label;
         if(els.roadName)els.roadName.textContent=label;
       }
+      const limit=onRoad?(hit?.seg?.speedLimit||null):null;
+      if(limit!==lastSpeedLimit){
+        lastSpeedLimit=limit;
+        if(els.speedLimit){
+          els.speedLimit.classList.toggle('hidden',!limit);
+          if(limit)els.speedLimit.textContent=String(limit);
+        }
+      }
     }
 
     const speedKmh=Math.round(absSpeed*3.6);
     sessionTopSpeedKmh=Math.max(sessionTopSpeedKmh,speedKmh);
     els.speed.textContent=speedKmh;
     els.gear.textContent=speedMps<-.25?'R':'D';
+    document.querySelector('.drive-hud')?.classList.toggle('speeding',Boolean(lastSpeedLimit&&speedKmh>lastSpeedLimit+5));
     if(els.tripDistance)els.tripDistance.textContent=formatTripDistance(sessionDistanceM);
     if(els.topSpeed)els.topSpeed.textContent=String(sessionTopSpeedKmh);
   }
@@ -1199,9 +1982,13 @@
     requestAnimationFrame(animate);
     const dt=Math.min(clock.getDelta(),.045);
     const elapsed=clock.elapsedTime;
+    updateAmbientTraffic(dt);
     updateCar(dt,elapsed);
+    updateNavigation(elapsed);
     updateCamera(dt);
     maybeStreamWorld(elapsed);
+    paintMiniMap(elapsed);
+    updateEngineAudio();
     renderer.render(scene,camera);
     adaptRenderQuality();
   }
@@ -1223,10 +2010,20 @@
   function buildPresetButtons() {
     els.presetGrid.innerHTML='';
     PRESETS.forEach(place=>{
-      const btn=document.createElement('button');btn.type='button';btn.className='preset';
+      const btn=document.createElement('button');btn.type='button';btn.className='preset';btn._place=place;
       btn.innerHTML=`<strong>${escapeHtml(place.name)}</strong><span>${escapeHtml(place.subtitle)}</span>`;
-      btn.addEventListener('click',()=>loadLocation(place));
+      btn.addEventListener('click',()=>handlePlaceChoice(place));
       els.presetGrid.appendChild(btn);
+    });
+    refreshPresetDistances();
+  }
+
+  function refreshPresetDistances() {
+    const here=currentCarCoords();
+    [...els.presetGrid.children].forEach(btn=>{
+      const p=btn._place,span=btn.querySelector('span');if(!p||!span)return;
+      const d=haversineMeters(here.lat,here.lon,p.lat,p.lon);
+      span.textContent=`${p.subtitle} · ≈${formatDistance(d)}`;
     });
   }
 
@@ -1234,14 +2031,27 @@
     els.placesBtn.addEventListener('click',()=>setPanelOpen(!els.placesPanel.classList.contains('open')));
     els.closePanelBtn.addEventListener('click',closePanel);
     els.resetBtn.addEventListener('click',resetCar);
-    els.randomBtn.addEventListener('click',()=>loadLocation(PRESETS[Math.floor(Math.random()*PRESETS.length)]));
+    els.soundBtn.addEventListener('click',toggleEngineSound);
+    els.cancelNavBtn.addEventListener('click',()=>clearNavigation());
+    els.navigateModeBtn.addEventListener('click',()=>setPlaceMode('navigate'));
+    els.startModeBtn.addEventListener('click',()=>setPlaceMode('start'));
+    els.mapExpandBtn.addEventListener('click',e=>{e.stopPropagation();toggleMiniMapExpanded();});
+    els.miniMapCanvas.addEventListener('click',()=>toggleMiniMapExpanded());
+    els.mapOrientationBtn.addEventListener('click',e=>{
+      e.stopPropagation();
+      miniMapHeadingUp=!miniMapHeadingUp;
+      els.mapOrientationBtn.textContent=miniMapHeadingUp?'↗':'N';
+      try{localStorage.setItem('drivesg-map-heading-up',miniMapHeadingUp?'1':'0');}catch(_){}
+      lastMiniMapPaint=-Infinity;
+    });
+    els.randomBtn.addEventListener('click',()=>handlePlaceChoice(PRESETS[Math.floor(Math.random()*PRESETS.length)]));
     els.nearMeBtn.addEventListener('click',useCurrentLocation);
 
     els.searchForm.addEventListener('submit',async e=>{
       e.preventDefault();
       const q=els.searchInput.value.trim();if(!q)return;
       const exact=PRESETS.find(p=>p.name.toLowerCase().includes(q.toLowerCase())||q.toLowerCase().includes(p.name.toLowerCase()));
-      if(exact)return loadLocation(exact);
+      if(exact)return handlePlaceChoice(exact);
       await searchSingapore(q);
     });
 
@@ -1313,6 +2123,8 @@
   function clearInputs() { input.gas=input.brake=input.steer=0; reverseHold=0; els.gasBtn.classList.remove('active');els.brakeBtn.classList.remove('active');updateSteerKnob(0); }
 
   function setPanelOpen(open) {
+    if(open&&miniMapExpanded)toggleMiniMapExpanded();
+    if(open){setPlaceMode(placeMode);buildRecentDestinations();refreshPresetDistances();}
     els.placesPanel.classList.toggle('open',open);
     document.body.classList.toggle('panel-open',open);
     clearInputs();
@@ -1330,7 +2142,7 @@
       pos=>{
         const lat=pos.coords.latitude,lon=pos.coords.longitude;
         if(!insideSingapore(lat,lon)){els.searchMsg.textContent='Your current location appears to be outside Singapore.';return;}
-        loadLocation({name:'Near me',subtitle:'Current location',lat,lon});
+        handlePlaceChoice({name:'My location',subtitle:'Current location',lat,lon});
       },
       ()=>{els.searchMsg.textContent='Safari did not provide your location. You can pick a place below instead.';},
       {enableHighAccuracy:false,timeout:9000,maximumAge:120000}
@@ -1338,15 +2150,26 @@
   }
 
   async function searchSingapore(query) {
+    const key=query.trim().toLowerCase();
     els.searchMsg.textContent='Searching Singapore…';
     try{
-      const url=`https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&countrycodes=sg&q=${encodeURIComponent(query+', Singapore')}`;
-      const res=await fetch(url,{headers:{Accept:'application/json'}});
-      if(!res.ok)throw new Error(`Search ${res.status}`);
-      const results=await res.json();if(!results.length)throw new Error('No match');
-      const lat=Number(results[0].lat),lon=Number(results[0].lon);if(!insideSingapore(lat,lon))throw new Error('Outside Singapore');
-      const label=(results[0].display_name||query).split(',')[0];
-      await loadLocation({name:label,subtitle:'Search result',lat,lon});
+      let place=geocodeCache.get(key);
+      if(!place){
+        const url=`${GEOCODE_ENDPOINT}?format=jsonv2&limit=1&countrycodes=sg&accept-language=en&q=${encodeURIComponent(query+', Singapore')}`;
+        const controller=new AbortController();
+        const timeoutId=setTimeout(()=>controller.abort(),9000);
+        let res;
+        try{res=await fetch(url,{headers:{Accept:'application/json'},signal:controller.signal});}
+        finally{clearTimeout(timeoutId);}
+        if(!res.ok)throw new Error(`Search ${res.status}`);
+        const results=await res.json();if(!results.length)throw new Error('No match');
+        const lat=Number(results[0].lat),lon=Number(results[0].lon);if(!insideSingapore(lat,lon))throw new Error('Outside Singapore');
+        const label=(results[0].display_name||query).split(',')[0];
+        place={name:label,subtitle:'Search result',lat,lon};
+        geocodeCache.set(key,place);while(geocodeCache.size>30)geocodeCache.delete(geocodeCache.keys().next().value);
+      }
+      els.searchMsg.textContent='';
+      handlePlaceChoice(place);
     }catch(err){console.warn(err);els.searchMsg.textContent='Could not find that. Try a Singapore road, district or landmark.';}
   }
 
