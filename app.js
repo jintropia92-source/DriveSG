@@ -1,7 +1,7 @@
 (() => {
   'use strict';
 
-  const BUILD_ID = '20260901experience1';
+  const BUILD_ID = '20260901v2';
   const SG_BOUNDS = { minLat: 1.16, maxLat: 1.456, minLon: 103.60, maxLon: 104.10 };
   const CONFIG = window.DRIVESG_CONFIG || {};
   const OVERPASS_ENDPOINTS = Array.isArray(CONFIG.overpassEndpoints) && CONFIG.overpassEndpoints.length
@@ -117,6 +117,23 @@
     ocbc:{text:'OCBC Centre is part of the dense Raffles Place skyline in Singapore’s financial core.',note:'CBD roads are short, signal-heavy and surrounded by tall building canyons.'}
   };
 
+  const VISUAL_PROFILES = {
+    default:{accent:'#79e7c4',accent2:'#a6d8ff',skyWarm:'#8ab3c3',building:0xc7c0b3,glass:0x8fa3ad,green:0x567459},
+    'marina-bay':{accent:'#70e8d0',accent2:'#7cb8ff',skyWarm:'#7da9c8',building:0xc4c8c8,glass:0x7898a8,green:0x53775f},
+    civic:{accent:'#e6c589',accent2:'#9fd2db',skyWarm:'#b19b8e',building:0xd6c9b2,glass:0x738f99,green:0x5d7558},
+    orchard:{accent:'#dfc7ff',accent2:'#7de4d0',skyWarm:'#9b91aa',building:0xcbc7c0,glass:0x667f92,green:0x54775b},
+    chinatown:{accent:'#f3b36f',accent2:'#ef7c70',skyWarm:'#b68b77',building:0xd1b99d,glass:0x6e8387,green:0x5e7455},
+    'kampong-glam':{accent:'#e7bd67',accent2:'#7dd0d8',skyWarm:'#b6a47e',building:0xd7c6a6,glass:0x70898e,green:0x5d7757},
+    'little-india':{accent:'#f08cb9',accent2:'#f0c56b',skyWarm:'#b78da1',building:0xd2b6ad,glass:0x74868f,green:0x587753},
+    'toa-payoh':{accent:'#9fe0a9',accent2:'#87c8e6',skyWarm:'#97b2a2',building:0xcac7b9,glass:0x77909a,green:0x577b56},
+    harbourfront:{accent:'#77d9cf',accent2:'#80b9e8',skyWarm:'#7ca6b0',building:0xbfc5c3,glass:0x708c98,green:0x50775b},
+    sentosa:{accent:'#8ee2b1',accent2:'#6fd8e9',skyWarm:'#83b7ac',building:0xc5c8bc,glass:0x79929a,green:0x4f7d55},
+    'east-coast':{accent:'#77d9c5',accent2:'#86c9ff',skyWarm:'#7eb2bd',building:0xc5c9c5,glass:0x78939d,green:0x4d7957},
+    changi:{accent:'#87e2be',accent2:'#83c9ff',skyWarm:'#82b4ba',building:0xc6c9c4,glass:0x75949e,green:0x4f7c59},
+    'jurong-east':{accent:'#8fc8ff',accent2:'#95e0bf',skyWarm:'#8caab7',building:0xc2c7c6,glass:0x748d98,green:0x56765c},
+    woodlands:{accent:'#91d6ae',accent2:'#85bfe4',skyWarm:'#8faeaa',building:0xc8c7bb,glass:0x788f98,green:0x587757}
+  };
+
   const LANDMARKS = [
     { name: 'Marina Bay Sands', lat: 1.2834, lon: 103.8607, kind: 'mbs' },
     { name: 'Singapore Flyer', lat: 1.2893, lon: 103.8631, kind: 'flyer' },
@@ -203,6 +220,7 @@
   let sessionDistanceM = 0;
   let sessionTopSpeedKmh = 0;
   let reverseHold = 0;
+  let reverseEngaged = false;
   let longitudinalVisual = 0;
   let tailLightMaterial = null;
   let lastRoadLabel = '';
@@ -241,6 +259,7 @@
   let rainPoints = null;
   let rainPositions = null;
   let wetness = 0;
+  let inTunnel = false;
   let trafficDataBusy = false;
   let lastTrafficDataRefresh = -Infinity;
   let liveTrafficBands = [];
@@ -285,6 +304,9 @@
   let lastPhysicsSpeedMps = 0;
   let lastElevationTarget = 0;
   let roadShock = 0;
+  let skyDome = null, skyUniforms = null, sunDisc = null, moonDisc = null;
+  let currentVisualProfileId = 'default';
+  let journeyPostcardLast = null;
 
   const input = { gas: 0, brake: 0, steer: 0 };
   const shared = {};
@@ -364,6 +386,7 @@
     navDestinationName: document.getElementById('navDestinationName'),
     navRemaining: document.getElementById('navRemaining'),
     navEta: document.getElementById('navEta'),
+    navProgressBar: document.getElementById('navProgressBar'),
     cancelNavBtn: document.getElementById('cancelNavBtn'),
     miniMapCard: document.getElementById('miniMapCard'),
     miniMapCanvas: document.getElementById('miniMapCanvas'),
@@ -405,7 +428,20 @@
     speedFx: document.getElementById('speedFx'),
     speedVignette: document.getElementById('speedVignette'),
     rainGlass: document.getElementById('rainGlass'),
-    shareBtn: document.getElementById('shareBtn')
+    shareBtn: document.getElementById('shareBtn'),
+    creditsBtn: document.getElementById('creditsBtn'),
+    creditsChip: document.getElementById('creditsChip'),
+    creditsOverlay: document.getElementById('creditsOverlay'),
+    creditsCloseBtn: document.getElementById('creditsCloseBtn'),
+    journeyPostcard: document.getElementById('journeyPostcard'),
+    journeyPostcardTitle: document.getElementById('journeyPostcardTitle'),
+    journeyPostcardRoute: document.getElementById('journeyPostcardRoute'),
+    journeyPostcardTime: document.getElementById('journeyPostcardTime'),
+    journeyPostcardLandmarks: document.getElementById('journeyPostcardLandmarks'),
+    journeyPostcardPassport: document.getElementById('journeyPostcardPassport'),
+    journeyPostcardNote: document.getElementById('journeyPostcardNote'),
+    journeyContinueBtn: document.getElementById('journeyContinueBtn'),
+    journeyAnotherBtn: document.getElementById('journeyAnotherBtn')
   };
 
   async function init() {
@@ -495,8 +531,10 @@
     sunTarget = new THREE.Object3D();
     scene.add(sunTarget);
     sun.target = sunTarget;
+    createSkyAtmosphere();
 
     makeSharedMaterials();
+    applyDistrictVisualProfile('marina-bay');
 
     persistentWorld = new THREE.Group();
     scene.add(persistentWorld);
@@ -518,6 +556,43 @@
     document.addEventListener('visibilitychange', () => { if (!document.hidden) clock.getDelta(); });
   }
 
+  function createSkyAtmosphere(){
+    skyUniforms={
+      topColor:{value:new THREE.Color(0x5d93ad)},
+      horizonColor:{value:new THREE.Color(0xc6d6d8)},
+      bottomColor:{value:new THREE.Color(0xe4d9c6)},
+      horizonPower:{value:1.28}
+    };
+    const mat=new THREE.ShaderMaterial({
+      uniforms:skyUniforms,side:THREE.BackSide,depthWrite:false,fog:false,
+      vertexShader:`varying vec3 vPos; void main(){vPos=position;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}`,
+      fragmentShader:`uniform vec3 topColor;uniform vec3 horizonColor;uniform vec3 bottomColor;uniform float horizonPower;varying vec3 vPos;void main(){float h=normalize(vPos).y;float upper=smoothstep(-0.03,0.72,h);float low=smoothstep(-0.42,0.02,h);vec3 c=mix(bottomColor,horizonColor,low);c=mix(c,topColor,pow(upper,horizonPower));gl_FragColor=vec4(c,1.0);}`
+    });
+    skyDome=new THREE.Mesh(new THREE.SphereGeometry(3200,32,20),mat);skyDome.renderOrder=-1000;scene.add(skyDome);
+    const sunMat=new THREE.MeshBasicMaterial({color:0xffe4a3,transparent:true,opacity:.9,depthWrite:false,toneMapped:false});
+    sunDisc=new THREE.Mesh(new THREE.SphereGeometry(13,18,12),sunMat);scene.add(sunDisc);
+    const moonMat=new THREE.MeshBasicMaterial({color:0xe9f2f8,transparent:true,opacity:0,depthWrite:false,toneMapped:false});
+    moonDisc=new THREE.Mesh(new THREE.SphereGeometry(8,16,10),moonMat);scene.add(moonDisc);
+  }
+
+  function visualProfileFor(id=currentVisualProfileId){return VISUAL_PROFILES[id]||VISUAL_PROFILES.default;}
+
+  function applyDistrictVisualProfile(id='default'){
+    const next=VISUAL_PROFILES[id]?id:'default';if(next===currentVisualProfileId)return;
+    currentVisualProfileId=next;const p=visualProfileFor(next);
+    document.body.dataset.district=next;
+    document.documentElement.style.setProperty('--drive-accent',p.accent);
+    document.documentElement.style.setProperty('--drive-accent-2',p.accent2);
+    if(shared.buildings?.[0])shared.buildings[0].color.setHex(p.building);
+    if(shared.buildings?.[4])shared.buildings[4].color.setHex(p.glass);
+    if(shared.treeLeaf)shared.treeLeaf.color.setHex(p.green);
+    if(shared.windows){shared.windows.emissive.copy(new THREE.Color(p.accent2).multiplyScalar(.16));shared.windows.color.copy(new THREE.Color(p.glass).offsetHSL(0,-.05,-.16));}
+    if(shared.officeBand){shared.officeBand.emissive.copy(new THREE.Color(p.accent2).multiplyScalar(.11));shared.officeBand.color.copy(new THREE.Color(p.glass).offsetHSL(0,-.04,-.10));}
+    if(shared.storefront)shared.storefront.emissive.copy(new THREE.Color(p.accent).multiplyScalar(.13));
+    if(shared.treeLeafLight)shared.treeLeafLight.color.copy(new THREE.Color(p.green).offsetHSL(.015,.015,.06));
+    if(shared.palmLeaf)shared.palmLeaf.color.copy(new THREE.Color(p.green).offsetHSL(-.01,.03,-.01));
+  }
+
   function makeSharedMaterials() {
     shared.sidewalk = new THREE.MeshStandardMaterial({ color: 0x9b9a92, roughness: 1, metalness: 0, side: THREE.DoubleSide });
     shared.roadEdge = new THREE.MeshStandardMaterial({ color: 0x747873, roughness: 1, metalness: 0, side: THREE.DoubleSide });
@@ -526,7 +601,9 @@
     shared.line = new THREE.MeshBasicMaterial({ color: 0xf0ead7, transparent: true, opacity: 0.86, depthWrite: false, side: THREE.DoubleSide });
     shared.median = new THREE.MeshStandardMaterial({ color: 0x697665, roughness: 1, metalness: 0, side: THREE.DoubleSide });
     shared.bridge = new THREE.MeshStandardMaterial({ color: 0x6f7577, roughness: .92, metalness: .04, side: THREE.DoubleSide });
-    shared.tunnel = new THREE.MeshStandardMaterial({ color: 0x32383a, roughness: .96, metalness: 0, side: THREE.DoubleSide });
+    shared.tunnel = new THREE.MeshStandardMaterial({ color: 0x2d3437, roughness: .94, metalness: 0, side: THREE.DoubleSide });
+    shared.tunnelLight = new THREE.MeshStandardMaterial({ color: 0xfff2c9, emissive: 0xffd98a, emissiveIntensity: 3.2, roughness: .32, metalness: .05 });
+    shared.roadStud = new THREE.MeshStandardMaterial({ color: 0xf8f4df, emissive: 0xbcc8c1, emissiveIntensity: .58, roughness: .42 });
     shared.water = new THREE.MeshStandardMaterial({ color: 0x527d8d, roughness: 0.72, metalness: 0.03, transparent: true, opacity: 0.93, side: THREE.DoubleSide });
     shared.park = new THREE.MeshStandardMaterial({ color: 0x688268, roughness: 1, metalness: 0, side: THREE.DoubleSide });
     shared.terrain = new THREE.MeshStandardMaterial({ color: 0x73806c, roughness: 1, metalness: 0, side: THREE.DoubleSide });
@@ -573,6 +650,13 @@
     horizonHaze = new THREE.Mesh(new THREE.CylinderGeometry(1500, 1500, 160, 48, 1, true), mat);
     horizonHaze.position.y = 80;
     persistentWorld.add(horizonHaze);
+  }
+
+  function makeCarPlateTexture(text='SG'){
+    const c=document.createElement('canvas');c.width=256;c.height=72;const ctx=c.getContext('2d');if(!ctx)return null;
+    ctx.fillStyle='#f2f3ee';ctx.fillRect(0,0,c.width,c.height);ctx.strokeStyle='#111';ctx.lineWidth=5;ctx.strokeRect(4,4,c.width-8,c.height-8);
+    ctx.fillStyle='#111';ctx.textAlign='center';ctx.textBaseline='middle';ctx.font='800 34px -apple-system, Arial';ctx.fillText(`${text}  ·  DRV`,128,38);
+    const t=new THREE.CanvasTexture(c);t.colorSpace=THREE.SRGBColorSpace;t.minFilter=THREE.LinearFilter;t.magFilter=THREE.LinearFilter;return t;
   }
 
   function createCar() {
@@ -623,6 +707,19 @@
       const lamp = new THREE.Mesh(new THREE.BoxGeometry(.34,.15,.05), tailMat);
       lamp.position.set(x,y,z); car.add(lamp);
     });
+
+    // Extra exterior detail: still low-poly, but now reads like a finished modern saloon rather than a blockout.
+    const roof=new THREE.Mesh(new THREE.BoxGeometry(1.42,.13,1.16),bodyMat);roof.position.set(0,1.68,-.23);roof.castShadow=true;car.add(roof);
+    const windscreen=new THREE.Mesh(new THREE.BoxGeometry(1.46,.52,.045),glassMat);windscreen.position.set(0,1.39,.76);windscreen.rotation.x=-.43;car.add(windscreen);
+    const rearGlass=windscreen.clone();rearGlass.position.z=-1.02;rearGlass.rotation.x=.43;car.add(rearGlass);
+    [[-1.02,1.19,.55],[1.02,1.19,.55]].forEach(([x,y,z])=>{const mirror=new THREE.Mesh(new THREE.BoxGeometry(.22,.12,.34),trimMat);mirror.position.set(x,y,z);car.add(mirror);});
+    const grille=new THREE.Mesh(new THREE.BoxGeometry(1.25,.28,.035),trimMat);grille.position.set(0,.72,2.185);car.add(grille);
+    const chromeMat=new THREE.MeshStandardMaterial({color:0xb9c1c4,metalness:.72,roughness:.23});
+    const badge=new THREE.Mesh(new THREE.TorusGeometry(.13,.035,6,12),chromeMat);badge.position.set(0,.78,2.215);badge.rotation.x=Math.PI/2;car.add(badge);
+    const plateTexture=makeCarPlateTexture('SG');
+    if(plateTexture){const plateMat=new THREE.MeshBasicMaterial({map:plateTexture,toneMapped:false});
+      const fp=new THREE.Mesh(new THREE.PlaneGeometry(.62,.18),plateMat);fp.position.set(0,.50,2.195);car.add(fp);
+      const rp=fp.clone();rp.position.set(0,.50,-2.195);rp.rotation.y=Math.PI;car.add(rp);}
 
     carShadow = new THREE.Mesh(
       new THREE.CircleGeometry(1.55, 24),
@@ -1025,7 +1122,7 @@
     navigation.arrived=false;
     navigation.lastInstructionKey='';
     renderNavigationWorld();
-    els.routingCredit.textContent=` · routing by ${route.provider||'OSRM'}`;
+    els.routingCredit.textContent='';
     els.navBanner.classList.add('show');
     updateNavigationUi(0);
   }
@@ -1054,6 +1151,8 @@
     navigation=makeEmptyNavigation();
     clearActiveDestination();
     els.navBanner.classList.remove('show','rerouting');
+    document.body.classList.remove('navigating');
+    if(els.navProgressBar)els.navProgressBar.style.width='0%';
     els.routingCredit.textContent='';
     els.placeEyebrow.textContent='DRIVING AROUND';
     els.locationName.textContent=currentLocationName;
@@ -1166,6 +1265,7 @@
   function updateNavigationUi(directToDest=0) {
     if(!navigation.active||!navigation.destination)return;
     els.navBanner.classList.add('show');
+    document.body.classList.add('navigating');
     els.navDestinationName.textContent=navigation.destination.name;
     els.placeEyebrow.textContent='NAVIGATING TO';
     els.locationName.textContent=navigation.destination.name;
@@ -1181,6 +1281,7 @@
       els.navTurnDistance.textContent=formatDistance(distToTurn);
       els.navRemaining.textContent=formatDistance(navigation.remainingM);
       els.navEta.textContent=navigation.remainingS?`${formatEta(navigation.remainingS)}${navigation.trafficLabel?` · ${navigation.trafficLabel}`:''}`:'';
+      if(els.navProgressBar)els.navProgressBar.style.width=`${THREE.MathUtils.clamp(navigation.totalM?navigation.progressM/navigation.totalM*100:0,0,100)}%`;
       const incidentAhead=nearestIncidentAhead();
       els.miniMapFooter.textContent=incidentAhead?`⚠ ${incidentAhead.type||'Traffic incident'} · ${formatDistance(incidentAhead.aheadM)} ahead`:`${formatDistance(navigation.remainingM)} · ${navigation.destination.name}${navigation.trafficLabel?` · ${navigation.trafficLabel}`:''}`;
     }else{
@@ -1194,6 +1295,7 @@
       els.navTurnDistance.textContent=formatDistance(navigation.remainingM||directToDest);
       els.navRemaining.textContent=formatDistance(navigation.remainingM||directToDest);
       els.navEta.textContent='COMPASS';
+      if(els.navProgressBar)els.navProgressBar.style.width='0%';
       els.miniMapFooter.textContent=`${formatDistance(navigation.remainingM||directToDest)} · ${navigation.destination.name}`;
     }
   }
@@ -1312,15 +1414,15 @@
     els.placePicker?.classList.toggle('hidden',challengeView);
     els.challengeSection?.classList.toggle('hidden',!challengeView);
     if(challengeView){
-      els.panelTitle.textContent='Choose a Singapore drive';
-      els.panelIntro.textContent='Timed point-to-point drives use the same real roads and navigation. Clean driving matters: collisions, off-road time and speeding reduce your score.';
+      els.panelTitle.textContent='Pick a driving challenge';
+      els.panelIntro.textContent='Timed Singapore drives. Clean driving improves your score.';
       buildChallengeButtons();
       return;
     }
-    els.panelTitle.textContent=nav?'Where do you want to go?':'Where do you want to start?';
+    els.panelTitle.textContent=nav?'Where in Singapore?':'Choose where to start';
     els.panelIntro.textContent=nav
-      ?`You are driving around ${currentLocationName}. Pick a destination and DriveSG will guide you there; “Start here” teleports to a new starting area.`
-      :'Choose a Singapore area to spawn on a nearby real road. Any active navigation will end.';
+      ?`Driving around ${currentLocationName}. Choose a destination or scenic drive.`
+      :'Pick an area and start on a nearby road.';
     els.searchInput.placeholder=nav?'Search destination, e.g. Bugis':'Search starting area, e.g. Bishan';
     els.randomBtnLabel.textContent=nav?'Random destination':'Random start';
   }
@@ -1430,7 +1532,7 @@
     challenge.phase='countdown';
     challenge.countdownEnds=(clock?.elapsedTime||0)+3.25;
     challenge.elapsedS=0;challenge.score=100;
-    speedMps=0;clearInputs();
+    speedMps=0;reverseEngaged=false;clearInputs();
     els.challengeCountdown?.classList.add('show');
     els.challengeCountdown?.classList.remove('go');
     if(els.challengeCountdownText)els.challengeCountdownText.textContent='3';
@@ -1596,7 +1698,7 @@
     els.challengeSection?.classList.add('hidden');
     els.discoverSection?.classList.remove('hidden');
     if(els.panelTitle)els.panelTitle.textContent='Discover Singapore';
-    if(els.panelIntro)els.panelIntro.textContent='Relaxed guided drives for seeing how Singapore changes from district to district.';
+    if(els.panelIntro)els.panelIntro.textContent='Scenic routes through Singapore’s most distinctive areas.';
     buildGuidedDriveButtons();
     updatePassportProgress();
   }
@@ -1624,13 +1726,32 @@
     }
   }
 
+  function closeJourneyPostcard(){els.journeyPostcard?.classList.remove('show');document.body.classList.remove('postcard-open');}
+
+  function showJourneyPostcard(snapshot){
+    if(!els.journeyPostcard||!snapshot)return;
+    journeyPostcardLast=snapshot;
+    const elapsedMs=Math.max(0,Date.now()-(snapshot.startedAt||Date.now()));
+    const mins=Math.max(1,Math.round(elapsedMs/60000));
+    const passport=updatePassportProgress();
+    els.journeyPostcardTitle.textContent=snapshot.def.name;
+    els.journeyPostcardRoute.textContent=`${snapshot.def.start.name} → ${snapshot.def.finish.name}`;
+    els.journeyPostcardTime.textContent=`${mins} min`;
+    els.journeyPostcardLandmarks.textContent=String(snapshot.highlightSeen?.size||0);
+    els.journeyPostcardPassport.textContent=`${passport.count} / ${passport.total}`;
+    els.journeyPostcardNote.textContent=(snapshot.highlightSeen?.size||0)>2?'A proper slice of Singapore — skyline, streets and neighbourhood character.':'Another part of Singapore is now in your passport.';
+    els.journeyPostcard.classList.add('show');document.body.classList.add('postcard-open');
+  }
+
   function finishGuidedDrive(){
     if(!guidedDrive?.active||guidedDrive.arrival)return false;
     guidedDrive.arrival=true;
+    const snapshot={...guidedDrive,highlightSeen:new Set(guidedDrive.highlightSeen||[])};
     const completed=readGuidedDriveCompleted();completed.add(guidedDrive.def.id);writeGuidedDriveCompleted(completed);
     buildGuidedDriveButtons();
-    showDiscoveryCard('DRIVE COMPLETE',guidedDrive.def.name,'You reached the end of this Singapore discovery drive. Your passport keeps every district and landmark you passed.',`${guidedDrive.highlightSeen.size} featured landmark${guidedDrive.highlightSeen.size===1?'':'s'} noticed on this drive.`,10000);
+    showDiscoveryCard('DRIVE COMPLETE',guidedDrive.def.name,'You reached the end of this Singapore discovery drive.',`${guidedDrive.highlightSeen.size} featured landmark${guidedDrive.highlightSeen.size===1?'':'s'} noticed.`,4200);
     guidedDrive.active=false;
+    setTimeout(()=>showJourneyPostcard(snapshot),900);
     return true;
   }
 
@@ -1702,6 +1823,7 @@
     const zoneHit=nearestDiscoveryZone(c.lat,c.lon);
     if(zoneHit?.zone?.id!==currentDiscoveryZoneId){
       currentDiscoveryZoneId=zoneHit?.zone?.id||'';
+      applyDistrictVisualProfile(currentDiscoveryZoneId||'default');
       if(zoneHit){
         const zone=zoneHit.zone,fresh=markDiscovered(`zone:${zone.id}`);
         showAreaRibbon(zone);
@@ -2000,7 +2122,7 @@
     ctx.beginPath();ctx.moveTo(0,-10);ctx.lineTo(6,7);ctx.lineTo(0,4);ctx.lineTo(-6,7);ctx.closePath();ctx.fillStyle='#ffffff';ctx.fill();ctx.strokeStyle='#0c1518';ctx.lineWidth=2;ctx.stroke();ctx.restore();
 
     els.compassLabel.textContent=overviewNorthUp?'ROUTE · NORTH':(miniMapHeadingUp?headingCardinal(yaw):'NORTH');
-    if(!navigation.active)els.miniMapFooter.textContent=`${lastRoadLabel||currentLocationName}${oneMapDrawn?' · OneMap':''}`;
+    if(!navigation.active)els.miniMapFooter.textContent=`${lastRoadLabel||currentLocationName}`;
   }
 
   function toggleMiniMapExpanded(){
@@ -2461,19 +2583,34 @@
       const target=lightingTarget();lightingSunHour=target.hour;
       lightingNightFactor+=(target.night-lightingNightFactor)*Math.min(1,Math.max(.08,dt*3.2));
       const n=lightingNightFactor;
-      const day=new THREE.Color(0xa9c5cf),dusk=new THREE.Color(0x7a7181),night=new THREE.Color(0x07131d),sky=new THREE.Color();
-      if(n<.56)sky.lerpColors(day,dusk,n/.56);else sky.lerpColors(dusk,night,(n-.56)/.44);
+      const profile=visualProfileFor(),warm=new THREE.Color(profile.skyWarm||'#8ab3c3');
+      const dayTop=new THREE.Color(0x4f94b5).lerp(warm,.18),dayHorizon=new THREE.Color(0xc7d8d9).lerp(warm,.12),dayBottom=new THREE.Color(0xe5d7c5);
+      const duskTop=new THREE.Color(0x4b536f).lerp(warm,.22),duskHorizon=new THREE.Color(0xd59a87),duskBottom=new THREE.Color(0x705a67);
+      const nightTop=new THREE.Color(0x030b14),nightHorizon=new THREE.Color(0x122b3b),nightBottom=new THREE.Color(0x09141b);
+      const mixSky=(a,b)=>n<.56?a.clone().lerp(b,n/.56):b.clone().lerp(nightTop,(n-.56)/.44);
+      let top=n<.56?dayTop.clone().lerp(duskTop,n/.56):duskTop.clone().lerp(nightTop,(n-.56)/.44);
+      let horizon=n<.56?dayHorizon.clone().lerp(duskHorizon,n/.56):duskHorizon.clone().lerp(nightHorizon,(n-.56)/.44);
+      let bottom=n<.56?dayBottom.clone().lerp(duskBottom,n/.56):duskBottom.clone().lerp(nightBottom,(n-.56)/.44);
       const cloud=THREE.MathUtils.clamp((Number(environmentState.cloudPct)||0)/100,0,1),rainDim=/rain/.test(environmentState.condition||'')?.22:0;
-      sky.lerp(new THREE.Color(0x67767c),Math.max(0,cloud-.35)*.34+rainDim);
-      scene.background.copy(sky);if(scene.fog){scene.fog.color.copy(sky);scene.fog.density=THREE.MathUtils.lerp(.00125,.00158,n)+wetness*.00046;}
+      const overcast=new THREE.Color(0x65757b),dim=Math.max(0,cloud-.35)*.38+rainDim;top.lerp(overcast,dim);horizon.lerp(overcast,dim*.78);bottom.lerp(overcast,dim*.55);
+      const sky=horizon.clone().lerp(top,.42);scene.background.copy(sky);
+      if(skyUniforms){skyUniforms.topColor.value.copy(top);skyUniforms.horizonColor.value.copy(horizon);skyUniforms.bottomColor.value.copy(bottom);}
+      if(scene.fog){scene.fog.color.copy(horizon.clone().lerp(top,.32));scene.fog.density=THREE.MathUtils.lerp(.00118,.00153,n)+wetness*.00046;}
       if(horizonHaze){horizonHaze.material.color.copy(sky.clone().lerp(new THREE.Color(0x6a7c83),.28));horizonHaze.material.opacity=THREE.MathUtils.lerp(.22,.12,n)+wetness*.07;}
       if(hemi)hemi.intensity=THREE.MathUtils.lerp(2.35,.58,n)*(1-cloud*.22-rainDim);
       if(sun){sun.intensity=THREE.MathUtils.lerp(2.25,.15,n)*(1-cloud*.52-rainDim);sun.color.set(n>.32?0xffb56b:0xffeed0);}
       if(shared.windows)shared.windows.emissiveIntensity=THREE.MathUtils.lerp(.06,1.65,n);
       if(shared.storefront)shared.storefront.emissiveIntensity=THREE.MathUtils.lerp(.10,1.28,n);
-      if(shared.streetLamp)shared.streetLamp.emissiveIntensity=THREE.MathUtils.lerp(.08,4.6,n);
+      if(shared.streetLamp)shared.streetLamp.emissiveIntensity=THREE.MathUtils.lerp(.08,5.2,n);
+      if(shared.roadStud)shared.roadStud.emissiveIntensity=THREE.MathUtils.lerp(.34,2.15,n)+wetness*.55;
+      if(shared.line)shared.line.opacity=THREE.MathUtils.lerp(.84,.98,n);
+      if(shared.route)shared.route.opacity=THREE.MathUtils.lerp(.92,1,n);
+      if(shared.tunnelLight)shared.tunnelLight.emissiveIntensity=inTunnel?5.8:3.5;
+      if(sunDisc){sunDisc.material.opacity=THREE.MathUtils.clamp(1-n*1.5,0,.92)*(1-cloud*.65);sunDisc.material.color.set(n>.22?0xffb06b:0xffe4a3);}
+      if(moonDisc)moonDisc.material.opacity=THREE.MathUtils.clamp((n-.45)/.55,0,.72)*(1-cloud*.55);
       if(carHeadlight)carHeadlight.intensity=n>.35?THREE.MathUtils.lerp(0,34,(n-.35)/.65):0;
-      if(renderer)renderer.toneMappingExposure=THREE.MathUtils.lerp(1.10,.94,n)-wetness*.04;
+      if(inTunnel){if(hemi)hemi.intensity*=.42;if(sun)sun.intensity*=.10;}
+      if(renderer)renderer.toneMappingExposure=(THREE.MathUtils.lerp(1.10,.94,n)-wetness*.04)*(inTunnel?.88:1);
     }
   }
 
@@ -2560,8 +2697,8 @@
   function updateWeatherEffects(dt){
     const rainTarget=environmentState.condition==='heavy-rain'?1:(environmentState.condition==='rain'?.58:0);
     wetness+=(rainTarget-wetness)*Math.min(1,dt*(rainTarget>wetness?1.25:.18));
-    if(shared.road){shared.road.roughness=THREE.MathUtils.lerp(.96,.46,wetness);shared.road.metalness=THREE.MathUtils.lerp(0,.08,wetness);}
-    if(shared.majorRoad){shared.majorRoad.roughness=THREE.MathUtils.lerp(.95,.43,wetness);shared.majorRoad.metalness=THREE.MathUtils.lerp(0,.09,wetness);}
+    if(shared.road){shared.road.roughness=THREE.MathUtils.lerp(.96,.37,wetness);shared.road.metalness=THREE.MathUtils.lerp(0,.12,wetness);}
+    if(shared.majorRoad){shared.majorRoad.roughness=THREE.MathUtils.lerp(.95,.34,wetness);shared.majorRoad.metalness=THREE.MathUtils.lerp(0,.14,wetness);}
     if(shared.roadEdge)shared.roadEdge.roughness=THREE.MathUtils.lerp(1,.72,wetness);
     if(rainPoints&&rainPositions){
       rainPoints.visible=wetness>.05;rainPoints.material.opacity=THREE.MathUtils.lerp(0,.72,wetness);rainPoints.position.set(car.position.x,carRoadY,car.position.z);
@@ -2674,7 +2811,7 @@
 
   function updateEngineAudio() {
     if(!engineAudio)return;
-    const now=engineAudio.ctx.currentTime,target=engineSoundOn ? .028 : .0001;
+    const now=engineAudio.ctx.currentTime,target=engineSoundOn ? (inTunnel?.036:.028) : .0001;
     engineAudio.gain.gain.cancelScheduledValues(now);engineAudio.gain.gain.linearRampToValueAtTime(target,now+.08);
     const rev=55+Math.abs(speedMps)*5.4+input.gas*18;
     engineAudio.osc.frequency.setTargetAtTime(rev,now,.06);engineAudio.filter.frequency.setTargetAtTime(430+Math.abs(speedMps)*28,now,.08);
@@ -2684,7 +2821,7 @@
       engineAudio.harmonicGain.gain.setTargetAtTime(engineSoundOn?THREE.MathUtils.clamp(.004+input.gas*.006+Math.abs(speedMps)*.00012,.0001,.014):.0001,now,.06);
     }
     if(engineAudio.windGain){
-      const wind=engineSoundOn?THREE.MathUtils.clamp(Math.pow(Math.abs(speedMps)/34,1.65)*.022+wetness*.004,.0001,.026):.0001;
+      const wind=engineSoundOn?THREE.MathUtils.clamp((Math.pow(Math.abs(speedMps)/34,1.65)*.022+wetness*.004)*(inTunnel?.42:1),.0001,.026):.0001;
       engineAudio.windGain.gain.setTargetAtTime(wind,now,.08);
       engineAudio.windFilter.frequency.setTargetAtTime(900+Math.abs(speedMps)*52,now,.10);
     }
@@ -2916,6 +3053,8 @@
     const junctionMarkingCount = addJunctionRoadMarkings(group,segments,signalDescriptors);
     const busStopCount = addBusStops(group,busStopDescriptors);
     const streetLightCount=addStreetLights(group,segments,centerX,centerZ,selectedBuildings);
+    const tunnelLightCount=addTunnelLighting(group,segments);
+    const roadStudCount=addExpresswayRoadStuds(group,segments);
     const gantryCount=addRoadGantries(group,segments,centerX,centerZ);
     const roadSignCount=addRoadNameSigns(group,segments,centerX,centerZ);
     const treeCount = addRoadsideTrees(group, segments, centerX, centerZ, selectedBuildings, terrainPatch);
@@ -2926,7 +3065,7 @@
       buildingCount: selectedBuildings.length,
       buildingColliders: selectedBuildings,
       waterPolygons, parkPolygons,
-      treeCount, tropicalPlantCount, streetLightCount, gantryCount, roadSignCount, junctionMarkingCount, waterCount, parkCount, trafficSignalCount, crossingCount, busStopCount,
+      treeCount, tropicalPlantCount, streetLightCount, tunnelLightCount, roadStudCount, gantryCount, roadSignCount, junctionMarkingCount, waterCount, parkCount, trafficSignalCount, crossingCount, busStopCount,
       terrainPatch
     };
   }
@@ -3161,6 +3300,48 @@
     }
   }
 
+  function addTunnelLighting(group,segments){
+    const items=[];
+    for(const seg of segments){
+      if(!seg.tunnel)continue;
+      const dx=seg.bx-seg.ax,dz=seg.bz-seg.az,len=Math.hypot(dx,dz);if(len<7)continue;
+      const ux=dx/len,uz=dz/len,nx=-uz,nz=ux,yaw=Math.atan2(dx,dz);
+      const steps=Math.max(1,Math.floor(len/13));
+      for(let i=1;i<=steps;i++){
+        const t=i/(steps+1),x=seg.ax+dx*t,z=seg.az+dz*t,y=segmentYAt(seg,t)+3.08;
+        const side=Math.max(1.3,Math.min(seg.width*.28,3.5));
+        items.push({x:x+nx*side,z:z+nz*side,y,yaw},{x:x-nx*side,z:z-nz*side,y,yaw});
+        if(items.length>=150)break;
+      }
+      if(items.length>=150)break;
+    }
+    if(!items.length)return 0;
+    const mesh=new THREE.InstancedMesh(new THREE.BoxGeometry(.18,.075,.92),shared.tunnelLight,items.length);
+    const m=new THREE.Matrix4(),pos=new THREE.Vector3(),quat=new THREE.Quaternion(),scale=new THREE.Vector3(1,1,1),axis=new THREE.Vector3(0,1,0);
+    items.forEach((it,i)=>{pos.set(it.x,it.y,it.z);quat.setFromAxisAngle(axis,it.yaw);m.compose(pos,quat,scale);mesh.setMatrixAt(i,m);});
+    mesh.instanceMatrix.needsUpdate=true;mesh.castShadow=false;mesh.receiveShadow=false;mesh.userData.qualityLayer='detail';group.add(mesh);return items.length;
+  }
+
+  function addExpresswayRoadStuds(group,segments){
+    const items=[];
+    for(const seg of segments){
+      if(seg.tunnel||!/motorway|trunk/.test(seg.type||''))continue;
+      const dx=seg.bx-seg.ax,dz=seg.bz-seg.az,len=Math.hypot(dx,dz);if(len<18)continue;
+      const nx=-dz/len,nz=dx/len,yaw=Math.atan2(dx,dz),steps=Math.max(1,Math.floor(len/20));
+      for(let i=1;i<=steps;i++){
+        const t=i/(steps+1),x=seg.ax+dx*t,z=seg.az+dz*t,y=segmentYAt(seg,t)+.105,side=Math.max(1.5,seg.width/2-.42);
+        items.push({x:x+nx*side,z:z+nz*side,y,yaw},{x:x-nx*side,z:z-nz*side,y,yaw});
+        if(items.length>=180)break;
+      }
+      if(items.length>=180)break;
+    }
+    if(!items.length)return 0;
+    const mesh=new THREE.InstancedMesh(new THREE.BoxGeometry(.10,.022,.25),shared.roadStud,items.length);
+    const m=new THREE.Matrix4(),pos=new THREE.Vector3(),quat=new THREE.Quaternion(),scale=new THREE.Vector3(1,1,1),axis=new THREE.Vector3(0,1,0);
+    items.forEach((it,i)=>{pos.set(it.x,it.y,it.z);quat.setFromAxisAngle(axis,it.yaw);m.compose(pos,quat,scale);mesh.setMatrixAt(i,m);});
+    mesh.instanceMatrix.needsUpdate=true;mesh.castShadow=false;mesh.receiveShadow=false;mesh.userData.qualityLayer='micro';group.add(mesh);return items.length;
+  }
+
   function addRoadGantries(group,segments,centerX,centerZ){
     const items=[];
     for(let i=0;i<segments.length&&items.length<14;i++){
@@ -3254,20 +3435,24 @@
 
   function addTropicalVegetation(group,segments,parks,waters,centerX,centerZ,buildings=[],terrainPatch=activeTerrainPatch){
     const palms=[],shrubs=[];
+    const centerGeo=unproject(centerX,centerZ),zone=nearestDiscoveryZone(centerGeo.lat,centerGeo.lon),zoneId=zone?.id||'';
+    const lushCoastal=/changi|east-coast|sentosa|harbourfront/.test(zoneId),lushUrban=/orchard|toa-payoh|jurong-east|woodlands/.test(zoneId);
     for(let si=0;si<segments.length&&(palms.length+shrubs.length)<MAX_TROPICAL_PLANTS;si++){
       const seg=segments[si],dx=seg.bx-seg.ax,dz=seg.bz-seg.az,len=Math.hypot(dx,dz);if(len<40)continue;
       const ux=dx/len,uz=dz/len,nx=-uz,nz=ux,seed=Math.abs(Math.round(seg.ax*11+seg.az*7+si*19));
-      const spacing=/primary|secondary|tertiary/.test(seg.type||'')?72:105;
+      const spacing=/primary|secondary|tertiary/.test(seg.type||'')?(lushCoastal?54:(lushUrban?64:72)):(lushCoastal?82:105);
       for(let d=spacing*.5;d<len&&(palms.length+shrubs.length)<MAX_TROPICAL_PLANTS;d+=spacing){
         const side=pseudoRandom(seed+d*3)>.5?1:-1,off=seg.width/2+5.8+pseudoRandom(seed+d*7)*3.4;
         const x=seg.ax+ux*d+nx*off*side,z=seg.az+uz*d+nz*off*side;
         if(Math.hypot(x-centerX,z-centerZ)>760||pointHitsBuildingBounds(x,z,buildings,2.8))continue;
         const waterfront=nearSurfaceFeature(x,z,waters,16),park=nearSurfaceFeature(x,z,parks,12);
-        const boulevard=/primary|secondary/.test(seg.type||'')&&pseudoRandom(seed+d*13)>.62;
-        if(waterfront||park||boulevard){
+        const boulevard=/primary|secondary/.test(seg.type||'')&&pseudoRandom(seed+d*13)>(lushCoastal?.30:(lushUrban?.48:.62));
+        const districtLandscape=(lushCoastal||lushUrban)&&/primary|secondary|tertiary/.test(seg.type||'')&&pseudoRandom(seed+d*29)>.48;
+        if(waterfront||park||boulevard||districtLandscape){
           const scale=.78+pseudoRandom(seed+d*17)*.42;
           const y=terrainHeightAt(x,z,terrainPatch);
-          if(waterfront||pseudoRandom(seed+d*23)>.55)palms.push({x,z,y,scale});
+          const palmBias=lushCoastal?.36:(zoneId==='orchard'?.62:.55);
+          if(waterfront||pseudoRandom(seed+d*23)>palmBias)palms.push({x,z,y,scale});
           else shrubs.push({x,z,y,scale:.8+scale*.25});
         }
       }
@@ -4104,7 +4289,7 @@
   }
 
   function disposeWorldGroup(group) {
-    const retained = new Set([shared.terrain,shared.sidewalk,shared.roadEdge,shared.road,shared.majorRoad,shared.line,shared.markingYellow,shared.median,shared.bridge,shared.tunnel,shared.water,shared.park,shared.windows,shared.storefront,shared.hdbCorridor,shared.officeBand,shared.awning,shared.islandKerb,shared.treeTrunk,shared.treeLeaf,shared.treeLeafLight,shared.palmLeaf,shared.signalPole,shared.signalHead,shared.signalRed,shared.signalAmber,shared.signalGreen,shared.busStopPole,shared.busStopSign,shared.busShelterRoof,shared.busShelterGlass,shared.streetPole,shared.streetLamp,shared.gantryPole,shared.gantrySign,trafficMaterial,...shared.buildings]);
+    const retained = new Set([shared.terrain,shared.sidewalk,shared.roadEdge,shared.road,shared.majorRoad,shared.line,shared.markingYellow,shared.median,shared.bridge,shared.tunnel,shared.tunnelLight,shared.roadStud,shared.water,shared.park,shared.windows,shared.storefront,shared.hdbCorridor,shared.officeBand,shared.awning,shared.islandKerb,shared.treeTrunk,shared.treeLeaf,shared.treeLeafLight,shared.palmLeaf,shared.signalPole,shared.signalHead,shared.signalRed,shared.signalAmber,shared.signalGreen,shared.busStopPole,shared.busStopSign,shared.busShelterRoof,shared.busShelterGlass,shared.streetPole,shared.streetLamp,shared.gantryPole,shared.gantrySign,trafficMaterial,...shared.buildings]);
     group.traverse(obj=>{
       if(obj.geometry) obj.geometry.dispose?.();
       const mats = Array.isArray(obj.material) ? obj.material : (obj.material ? [obj.material] : []);
@@ -4225,6 +4410,7 @@
     spawnPose={x:px,z:pz,yaw};
     speedMps=0;
     reverseHold=0;
+    reverseEngaged=false;
     carRoadY=segmentYAt(seg,best.t);
     resetDrivingDynamics();
     car.position.set(px,.07+carRoadY,pz);
@@ -4254,23 +4440,51 @@
     absActive=Boolean(brake>.72&&absSpeed>7&&(wetness>.16||!onRoad));
     const brakeForce=baseBrake*(absActive?(.93+.035*Math.sin(elapsed*76)):1);
     const reverseAccel=4.8;
+    const reverseHoldSeconds=.30;
 
+    // One-pedal brake-to-reverse behaviour for touch controls:
+    // BRAKE slows the car first. Keep holding once stationary to deliberately engage R,
+    // then the same pedal becomes reverse throttle until released.
     if(gas>0){
       reverseHold=0;
+      reverseEngaged=false;
       if(speedMps<-0.45)speedMps+=brakeForce*dt;
       else speedMps+=accel*gas*dt;
     }
 
     if(brake>0){
-      if(speedMps>0.5){
+      if(speedMps>0.45){
         reverseHold=0;
+        reverseEngaged=false;
         speedMps-=brakeForce*brake*dt;
       }else{
-        if(speedMps>-.12){speedMps=0;reverseHold+=dt;}
-        if(reverseHold>.22 || speedMps<-.12) speedMps-=reverseAccel*brake*dt;
+        if(!reverseEngaged && speedMps>-.14){
+          speedMps=0;
+          reverseHold+=dt;
+          if(reverseHold>=reverseHoldSeconds)reverseEngaged=true;
+        }
+        if(reverseEngaged || speedMps<=-.14){
+          reverseEngaged=true;
+          speedMps-=reverseAccel*brake*dt;
+        }
       }
     }else if(!gas){
       reverseHold=0;
+      if(speedMps>-.08)reverseEngaged=false;
+    }
+
+    const brakeLabel=els.brakeBtn?.querySelector('span');
+    if(brakeLabel){
+      if(reverseEngaged || speedMps<-.14){
+        brakeLabel.textContent='REVERSE';
+        els.brakeBtn.classList.add('reverse-ready');
+      }else if(brake>0 && speedMps<=.45){
+        brakeLabel.textContent='HOLD R';
+        els.brakeBtn.classList.remove('reverse-ready');
+      }else{
+        brakeLabel.textContent='BRAKE';
+        els.brakeBtn.classList.remove('reverse-ready');
+      }
     }
 
     if(!gas&&!brake){
@@ -4350,6 +4564,8 @@
     }
 
     const elevationHit=nearestRoadHit(car.position.x,car.position.z,false);
+    inTunnel=Boolean(elevationHit&&elevationHit.seg?.tunnel&&elevationHit.dist<elevationHit.seg.width/2+3.5);
+    document.body.classList.toggle('in-tunnel',inTunnel);
     updateUserTrafficRuleState(elapsed,elevationHit);
     const elevationTarget=elevationHit&&elevationHit.dist<elevationHit.seg.width/2+4?segmentYAt(elevationHit.seg,elevationHit.t):terrainHeightAt(car.position.x,car.position.z,activeTerrainPatch);
     const elevationStep=Math.abs(elevationTarget-lastElevationTarget);
@@ -4372,7 +4588,7 @@
       const hit=nearestRoadHit(car.position.x,car.position.z,false);
       const edgeDist=hit?Math.max(0,hit.dist-hit.seg.width/2):Infinity;
       onRoad=edgeDist<3.0;
-      els.surfaceState.textContent=onRoad?'ON ROAD':'OFF ROAD';
+      els.surfaceState.textContent=inTunnel?'TUNNEL':(onRoad?'ON ROAD':'OFF ROAD');
       els.surfaceState.classList.toggle('offroad',!onRoad);
       const label=hit?.seg?.name || (onRoad?'Singapore road':'Off road');
       if(label!==lastRoadLabel){lastRoadLabel=label;if(els.roadName)els.roadName.textContent=label;}
@@ -4386,7 +4602,7 @@
     const speedKmh=Math.round(newAbsSpeed*3.6);
     sessionTopSpeedKmh=Math.max(sessionTopSpeedKmh,speedKmh);
     els.speed.textContent=speedKmh;
-    els.gear.textContent=speedMps<-.25?'R':'D';
+    els.gear.textContent=(reverseEngaged||speedMps<-.14)?'R':'D';
     document.querySelector('.drive-hud')?.classList.toggle('speeding',Boolean(lastSpeedLimit&&speedKmh>lastSpeedLimit+5));
     if(els.tripDistance)els.tripDistance.textContent=formatTripDistance(sessionDistanceM);
     if(els.topSpeed)els.topSpeed.textContent=String(sessionTopSpeedKmh);
@@ -4460,6 +4676,9 @@
     const sunHeight=Math.max(28,Math.sin(sunAngle)*190),sunRadius=155;
     sun.position.set(car.position.x+Math.cos(azimuth)*sunRadius,sunHeight,car.position.z+Math.sin(azimuth)*sunRadius);
     sunTarget.position.set(car.position.x,0,car.position.z);
+    if(sunDisc)sunDisc.position.set(car.position.x+Math.cos(azimuth)*720,THREE.MathUtils.clamp(sunHeight*2.25,65,420),car.position.z+Math.sin(azimuth)*720);
+    if(moonDisc){const maz=azimuth+Math.PI;moonDisc.position.set(car.position.x+Math.cos(maz)*760,260,car.position.z+Math.sin(maz)*760);}
+    if(skyDome){skyDome.position.x=car.position.x;skyDome.position.z=car.position.z;}
     if(horizonHaze){horizonHaze.position.x=car.position.x;horizonHaze.position.z=car.position.z;}
   }
 
@@ -4676,7 +4895,9 @@
     const blocked=()=>Boolean(
       els.placesPanel?.classList.contains('open')||
       els.hopMapOverlay?.classList.contains('show')||
+      els.creditsOverlay?.classList.contains('show')||
       els.challengeResult?.classList.contains('show')||
+      els.journeyPostcard?.classList.contains('show')||
       els.loader?.classList.contains('show')
     );
     canvas.addEventListener('pointerdown',e=>{
@@ -4699,6 +4920,12 @@
     canvas.addEventListener('pointercancel',end,{passive:true});
   }
 
+  function setCreditsOpen(open){
+    if(!els.creditsOverlay)return;
+    els.creditsOverlay.classList.toggle('show',Boolean(open));
+    document.body.classList.toggle('credits-open',Boolean(open));
+  }
+
   function bindUi() {
     els.placesBtn.addEventListener('click',()=>setPanelOpen(!els.placesPanel.classList.contains('open')));
     els.closePanelBtn.addEventListener('click',closePanel);
@@ -4707,6 +4934,13 @@
     els.soundBtn.addEventListener('click',toggleEngineSound);
     els.cameraBtn?.addEventListener('click',cycleCameraMode);
     els.shareBtn?.addEventListener('click',shareDriveSG);
+    els.creditsBtn?.addEventListener('click',()=>setCreditsOpen(true));
+    els.creditsChip?.addEventListener('click',()=>setCreditsOpen(true));
+    els.creditsCloseBtn?.addEventListener('click',()=>setCreditsOpen(false));
+    els.creditsOverlay?.addEventListener('click',e=>{if(e.target===els.creditsOverlay)setCreditsOpen(false);});
+    els.journeyContinueBtn?.addEventListener('click',closeJourneyPostcard);
+    els.journeyAnotherBtn?.addEventListener('click',()=>{closeJourneyPostcard();setPanelOpen(true);openDiscoverView();});
+    els.journeyPostcard?.addEventListener('click',e=>{if(e.target===els.journeyPostcard)closeJourneyPostcard();});
     els.cancelNavBtn.addEventListener('click',()=>{if(challenge.active)cancelChallenge();else if(guidedDrive?.active){cancelGuidedDrive({quiet:true});clearNavigation();}else clearNavigation();});
     els.navigateModeBtn.addEventListener('click',()=>setPlaceMode('navigate'));
     els.startModeBtn.addEventListener('click',()=>setPlaceMode('start'));
@@ -4811,7 +5045,15 @@
     btn.addEventListener('lostpointercapture',up,{passive:false});
   }
 
-  function clearInputs() { input.gas=input.brake=input.steer=0; reverseHold=0; els.gasBtn.classList.remove('active');els.brakeBtn.classList.remove('active');updateSteerKnob(0); }
+  function clearInputs() {
+    input.gas=input.brake=input.steer=0;
+    reverseHold=0;
+    if(speedMps>-.08)reverseEngaged=false;
+    els.gasBtn.classList.remove('active');
+    els.brakeBtn.classList.remove('active','reverse-ready');
+    const brakeLabel=els.brakeBtn?.querySelector('span');if(brakeLabel)brakeLabel.textContent='BRAKE';
+    updateSteerKnob(0);
+  }
 
   function setPanelOpen(open) {
     if(open&&miniMapExpanded)toggleMiniMapExpanded();
@@ -4862,7 +5104,7 @@
           if(BACKEND_ACTIVE){
             try{
               const res=await backendFetch(`/api/geocode?q=${encodeURIComponent(query)}`,{headers:{Accept:'application/json'},signal:controller.signal});
-              if(res.ok){const data=await res.json();const lat=Number(data.lat),lon=Number(data.lon);if(insideSingapore(lat,lon))place={name:data.name||query,subtitle:data.subtitle||(data.provider?`${data.provider} result`:'Search result'),lat,lon};}
+              if(res.ok){const data=await res.json();const lat=Number(data.lat),lon=Number(data.lon);if(insideSingapore(lat,lon))place={name:data.name||query,subtitle:data.subtitle||'Singapore destination',lat,lon};}
             }catch(err){console.warn('DriveSG geocode backend bypass',err?.message||err);}
           }
           if(!place){

@@ -219,6 +219,14 @@ button { color: inherit; border: 0; -webkit-appearance: none; appearance: none; 
   width: 70px; height: 70px; border-radius: 24px; background: rgba(13,17,19,.56); color: #ffaaa2; font-size: 9px;
   backdrop-filter: blur(11px); -webkit-backdrop-filter: blur(11px);
 }
+
+.pedal.brake.reverse-ready {
+  background: rgba(83,112,144,.72);
+  color: #eef7ff;
+  border-color: rgba(178,215,255,.36);
+  box-shadow: 0 9px 28px rgba(0,0,0,.20), 0 0 0 1px rgba(146,201,255,.08) inset;
+}
+
 .pedal.gas {
   width: 83px; height: 83px; border-radius: 28px; background: rgba(244,247,248,.91); color: #10171b; font-size: 10px;
 }
@@ -623,3 +631,174 @@ body.hop-map-open .topbar,body.hop-map-open .nav-banner,body.hop-map-open .minim
   .experience-hero small,.island-map-btn small{font-size:5.5px}.experience-hero strong,.island-map-btn strong{font-size:9px}.experience-icon{display:none}.experience-hero{gap:5px}.guided-drive-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.discovery-card{top:auto;right:calc(10px + var(--safe-right));bottom:calc(105px + var(--safe-bottom));width:220px}
   .area-ribbon{display:none}.terrain-credit{display:none}.hop-map-shell header p{display:none}
 }
+
+/* Singapore Experience polish — cleaner product UI, less developer-facing chrome */
+:root{
+  --sg-accent:#7fe6c7;
+  --sg-accent-strong:#b7f5e2;
+  --sg-panel:rgba(6,13,17,.82);
+  --sg-panel-strong:rgba(5,11,15,.94);
+  --sg-soft:rgba(255,255,255,.055);
+  --sg-border:rgba(255,255,255,.105);
+}
+
+.place-pill,
+.round-action,
+.nav-banner,
+.drive-hud,
+.weather-badge{
+  border-color:var(--sg-border);
+  background:linear-gradient(180deg,rgba(15,25,30,.78),rgba(5,11,15,.66));
+  box-shadow:0 12px 34px rgba(0,0,0,.20),inset 0 1px rgba(255,255,255,.035);
+}
+.place-pill{border-radius:17px;padding-left:12px}
+.place-pill .live-dot{background:var(--sg-accent);box-shadow:0 0 0 4px rgba(127,230,199,.10),0 0 18px rgba(127,230,199,.18)}
+.place-copy small{color:rgba(180,236,220,.60)}
+.round-action{color:rgba(248,252,251,.92);font-weight:600}
+.round-action:active{background:rgba(127,230,199,.12)}
+
+.places-panel{
+  border-color:rgba(255,255,255,.10);
+  background:
+    radial-gradient(circle at 8% 0%,rgba(73,153,133,.12),transparent 31%),
+    linear-gradient(180deg,rgba(8,17,22,.97),rgba(4,10,14,.96));
+  box-shadow:0 28px 80px rgba(0,0,0,.48),inset 0 1px rgba(255,255,255,.035);
+}
+.panel-head h1{font-weight:780;letter-spacing:-.045em}
+.panel-head p{color:rgba(231,239,241,.54)}
+.mode-switch{padding:3px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.07);border-radius:14px}
+.mode-switch button{border:0!important;background:transparent!important;color:rgba(255,255,255,.46)}
+.mode-switch button.active{background:linear-gradient(180deg,#f3faf7,#dcece6)!important;color:#0b1517;box-shadow:0 3px 12px rgba(0,0,0,.18)}
+.quick-btn,.preset,.guided-drive,.experience-hero,.island-map-btn{
+  border-color:rgba(255,255,255,.085)!important;
+  background:linear-gradient(180deg,rgba(255,255,255,.060),rgba(255,255,255,.030))!important;
+  box-shadow:inset 0 1px rgba(255,255,255,.025);
+}
+.quick-btn:active,.preset:active,.guided-drive:active,.experience-hero:active,.island-map-btn:active{background:rgba(127,230,199,.09)!important}
+.guided-drive.completed{border-color:rgba(127,230,199,.22)!important;background:linear-gradient(180deg,rgba(127,230,199,.075),rgba(127,230,199,.032))!important}
+.passport-card{background:linear-gradient(135deg,rgba(127,230,199,.09),rgba(127,230,199,.025));border-color:rgba(127,230,199,.16)}
+.passport-track{background:rgba(255,255,255,.055)}
+.passport-track i{background:linear-gradient(90deg,#70d9ba,#b1f2df);box-shadow:0 0 16px rgba(127,230,199,.24)}
+
+.panel-foot{padding-top:9px;border-top:1px solid rgba(255,255,255,.065);color:rgba(255,255,255,.34)}
+.panel-foot>.status-dot{background:var(--sg-accent)}
+.panel-foot-actions{margin-left:auto;display:flex;gap:6px;align-items:center}
+.panel-share{height:29px!important;padding:0 10px!important;border-radius:10px!important;background:rgba(255,255,255,.075)!important;border:1px solid rgba(255,255,255,.09)!important;color:rgba(255,255,255,.78)!important;font-size:7px!important;font-weight:850!important}
+.panel-share.quiet{background:transparent!important;color:rgba(255,255,255,.43)!important}
+
+.nav-banner{border-radius:19px;background:linear-gradient(180deg,rgba(8,17,21,.89),rgba(4,10,13,.82))}
+.nav-arrow{background:rgba(127,230,199,.10);border-radius:12px;color:var(--sg-accent-strong)}
+.nav-copy strong{font-weight:760}
+.nav-summary strong{color:var(--sg-accent-strong)}
+
+.drive-hud{border-radius:20px;background:linear-gradient(180deg,rgba(8,16,20,.80),rgba(3,8,11,.72));box-shadow:0 15px 38px rgba(0,0,0,.25)}
+#speed{font-weight:760;text-shadow:0 2px 18px rgba(255,255,255,.04)}
+.gear{color:var(--sg-accent-strong)}
+.speed-limit{box-shadow:0 4px 14px rgba(0,0,0,.22)}
+.dyn{background:rgba(255,255,255,.018);border-color:rgba(255,255,255,.075)}
+.dyn.grip{color:#a9e7c6}
+
+.steer-track{border-color:rgba(255,255,255,.11);background:linear-gradient(180deg,rgba(5,11,14,.54),rgba(3,8,10,.42));box-shadow:inset 0 1px rgba(255,255,255,.025)}
+.steer-knob{background:linear-gradient(145deg,#f4f7f6,#cfd9d6);box-shadow:0 12px 30px rgba(0,0,0,.30),inset 0 1px rgba(255,255,255,.78)}
+.pedal{box-shadow:0 13px 32px rgba(0,0,0,.28),inset 0 1px rgba(255,255,255,.045);transition:transform .10s ease,filter .10s ease,background .2s ease}
+.pedal.brake{background:linear-gradient(145deg,rgba(41,25,26,.78),rgba(13,16,18,.68));border-color:rgba(255,139,131,.18)}
+.pedal.brake.reverse-ready{background:linear-gradient(145deg,rgba(38,73,86,.82),rgba(12,29,37,.74));border-color:rgba(138,216,242,.28);color:#b8eaff;box-shadow:0 13px 32px rgba(0,0,0,.28),0 0 24px rgba(100,192,227,.09)}
+.pedal.gas{background:linear-gradient(145deg,#eaf7f2,#b9ddd0);color:#091411;box-shadow:0 14px 34px rgba(0,0,0,.30),0 0 24px rgba(127,230,199,.08),inset 0 1px rgba(255,255,255,.85)}
+
+.area-ribbon{border-color:rgba(127,230,199,.14);background:linear-gradient(180deg,rgba(8,18,21,.88),rgba(4,11,14,.80));box-shadow:0 14px 36px rgba(0,0,0,.25)}
+.area-ribbon span,.discovery-card>span,.credits-kicker{color:var(--sg-accent)}
+.discovery-card{border-color:rgba(127,230,199,.13);background:linear-gradient(155deg,rgba(10,22,26,.92),rgba(5,11,15,.88));box-shadow:0 20px 46px rgba(0,0,0,.34)}
+.discovery-card p{color:rgba(240,246,247,.62)}
+.discovery-card small{color:rgba(209,225,222,.44)}
+
+.hop-map-overlay,.credits-overlay{background:rgba(2,7,10,.74);backdrop-filter:blur(22px) saturate(.9);-webkit-backdrop-filter:blur(22px) saturate(.9)}
+.hop-map-shell{border-color:rgba(255,255,255,.10);background:radial-gradient(circle at 20% 0%,rgba(47,118,102,.11),transparent 34%),#071014;box-shadow:0 30px 90px rgba(0,0,0,.56)}
+.hop-map-canvas-wrap{border-color:rgba(255,255,255,.08);box-shadow:inset 0 0 42px rgba(0,0,0,.18)}
+.hop-map-tip{background:rgba(3,10,13,.75);border-color:rgba(255,255,255,.08)}
+.hop-map-actions .primary{background:linear-gradient(180deg,#effaf6,#cfe9df)}
+
+.loader-wrap{background:radial-gradient(circle at 50% 32%,rgba(63,132,115,.13),transparent 28%),#071014}
+.loader-card{padding:24px 26px;border:1px solid rgba(255,255,255,.08);border-radius:25px;background:linear-gradient(180deg,rgba(14,26,31,.72),rgba(5,12,16,.55));box-shadow:0 24px 70px rgba(0,0,0,.35)}
+.loader-logo{background:linear-gradient(145deg,#effbf7,#b8e5d6);color:#071411;box-shadow:0 8px 30px rgba(127,230,199,.12)}
+.progress-track{background:rgba(255,255,255,.06)}
+.progress-bar{background:linear-gradient(90deg,#66d3b2,#b2f2de);box-shadow:0 0 22px rgba(127,230,199,.20)}
+
+.hidden-credit{display:none!important}
+.credits-chip{position:fixed;z-index:9;right:calc(7px + var(--safe-right));top:calc(64px + var(--safe-top));width:24px;height:24px;border-radius:9px;border:1px solid rgba(255,255,255,.07);background:rgba(4,10,13,.34);color:rgba(255,255,255,.24);font-size:9px;backdrop-filter:blur(9px);-webkit-backdrop-filter:blur(9px);opacity:.58;transition:.18s ease}
+.credits-chip:active{opacity:1;background:rgba(127,230,199,.10);color:rgba(255,255,255,.8)}
+.credits-overlay{position:fixed;inset:0;z-index:90;display:grid;place-items:center;padding:18px;opacity:0;visibility:hidden;pointer-events:none;transition:.2s ease}
+.credits-overlay.show{opacity:1;visibility:visible;pointer-events:auto}
+.credits-card{position:relative;width:min(430px,90vw);padding:24px;border:1px solid rgba(255,255,255,.10);border-radius:23px;background:radial-gradient(circle at 10% 0%,rgba(75,153,133,.13),transparent 34%),rgba(5,12,16,.97);box-shadow:0 28px 90px rgba(0,0,0,.55)}
+.credits-card h2{margin:5px 0 8px;font-size:22px;letter-spacing:-.04em}.credits-card p{margin:0;color:rgba(237,244,245,.56);font-size:10px;line-height:1.5}.credits-card small{display:block;margin-top:14px;padding-top:11px;border-top:1px solid rgba(255,255,255,.07);color:rgba(255,255,255,.32);font-size:8px;line-height:1.4}
+.credits-close{position:absolute;right:11px;top:11px;width:34px;height:34px;border-radius:11px;background:rgba(255,255,255,.05);font-size:22px}.credits-links{display:grid;gap:7px;margin-top:16px}.credits-links a{padding:9px 10px;border:1px solid rgba(255,255,255,.07);border-radius:11px;background:rgba(255,255,255,.035);color:rgba(255,255,255,.72);font-size:9px;text-decoration:none}.credits-links a:active{background:rgba(127,230,199,.08)}
+body.credits-open .topbar,body.credits-open .nav-banner,body.credits-open .minimap-card,body.credits-open .drive-hud,body.credits-open .drive-controls,body.credits-open .drive-hint{pointer-events:none}
+
+@media (max-width:760px) and (orientation:landscape){
+  .credits-chip{top:calc(55px + var(--safe-top));width:21px;height:21px;border-radius:8px;font-size:8px}
+  .panel-foot-actions{gap:4px}.panel-share{height:26px!important;padding:0 8px!important;font-size:6px!important}
+  .credits-card{width:min(390px,82vw);padding:18px}.credits-card h2{font-size:18px}.credits-links{grid-template-columns:1fr 1fr}.credits-links a:last-child{grid-column:1/-1}
+}
+@media (max-width:700px) and (orientation:landscape){
+  .credits-chip{display:none}
+}
+
+/* Tunnel cabin effect: subtle only, the 3D tunnel lights do the main visual work. */
+.speed-fx::after{content:"";position:absolute;inset:0;background:radial-gradient(ellipse at 50% 48%,transparent 36%,rgba(0,0,0,.34) 100%);opacity:0;transition:opacity .28s ease;pointer-events:none}
+body.in-tunnel .speed-fx::after{opacity:.58}
+body.in-tunnel .rain-glass{opacity:.05!important}
+body.in-tunnel .surface-state{color:#f0dca2}
+
+
+/* DriveSG 2.0 — cinematic Singapore presentation */
+:root{--drive-accent:#79e7c4;--drive-accent-2:#a6d8ff;--glass:rgba(5,11,15,.61);--glass-strong:rgba(5,10,14,.92);--line:rgba(255,255,255,.105);--shadow:0 22px 70px rgba(0,0,0,.42)}
+body:after{content:"";position:fixed;inset:0;z-index:3;pointer-events:none;background:radial-gradient(ellipse at 50% 115%,color-mix(in srgb,var(--drive-accent) 7%,transparent),transparent 38%),linear-gradient(to bottom,rgba(0,0,0,.02),rgba(0,0,0,.12));mix-blend-mode:screen;opacity:.48}
+.topbar{top:calc(10px + var(--safe-top));}
+.place-pill{border-radius:18px;background:linear-gradient(135deg,rgba(7,15,20,.79),rgba(8,18,23,.54));box-shadow:0 10px 34px rgba(0,0,0,.22),inset 0 1px rgba(255,255,255,.035)}
+.live-dot,.status-dot{background:var(--drive-accent);box-shadow:0 0 0 4px color-mix(in srgb,var(--drive-accent) 13%,transparent),0 0 18px color-mix(in srgb,var(--drive-accent) 22%,transparent)}
+.round-action{border-radius:17px;background:linear-gradient(145deg,rgba(8,17,21,.72),rgba(3,8,11,.54));box-shadow:0 10px 28px rgba(0,0,0,.16),inset 0 1px rgba(255,255,255,.035)}
+.weather-badge{background:rgba(5,12,16,.54)!important;border-color:rgba(255,255,255,.08)!important}
+.places-panel{border-radius:27px;background:linear-gradient(155deg,rgba(7,14,19,.965),rgba(3,8,12,.92));border-color:rgba(255,255,255,.09);box-shadow:0 26px 90px rgba(0,0,0,.52),inset 0 1px rgba(255,255,255,.035)}
+.mode-switch{background:rgba(255,255,255,.025)!important;border:1px solid rgba(255,255,255,.06);padding:3px;border-radius:14px}
+.mode-switch button.active{background:linear-gradient(135deg,color-mix(in srgb,var(--drive-accent) 84%,white),color-mix(in srgb,var(--drive-accent-2) 34%,var(--drive-accent)));color:#071312;box-shadow:0 7px 18px color-mix(in srgb,var(--drive-accent) 12%,transparent)}
+.experience-hero{background:radial-gradient(circle at 12% 5%,color-mix(in srgb,var(--drive-accent) 17%,transparent),transparent 38%),linear-gradient(145deg,rgba(255,255,255,.082),rgba(255,255,255,.025))!important;border-color:color-mix(in srgb,var(--drive-accent) 24%,rgba(255,255,255,.1))!important}
+.experience-icon{color:var(--drive-accent)!important;text-shadow:0 0 22px color-mix(in srgb,var(--drive-accent) 45%,transparent)}
+.guided-drive.completed:after{background:var(--drive-accent)!important}
+.passport-track i{background:linear-gradient(90deg,var(--drive-accent),var(--drive-accent-2))!important;box-shadow:0 0 16px color-mix(in srgb,var(--drive-accent) 32%,transparent)}
+.nav-banner{overflow:hidden;border-color:rgba(255,255,255,.09);background:linear-gradient(145deg,rgba(5,12,16,.91),rgba(6,15,20,.78));box-shadow:0 15px 48px rgba(0,0,0,.32),inset 0 1px rgba(255,255,255,.04)}
+.nav-arrow{background:color-mix(in srgb,var(--drive-accent) 15%,rgba(255,255,255,.04))!important;color:color-mix(in srgb,var(--drive-accent) 82%,white)!important;border-color:color-mix(in srgb,var(--drive-accent) 18%,rgba(255,255,255,.08))!important}
+.nav-progress{position:absolute;left:12px;right:12px;bottom:0;height:2px;background:rgba(255,255,255,.045);overflow:hidden;border-radius:99px}
+.nav-progress i{display:block;width:0;height:100%;background:linear-gradient(90deg,var(--drive-accent),var(--drive-accent-2));box-shadow:0 0 12px color-mix(in srgb,var(--drive-accent) 55%,transparent);transition:width .25s linear}
+.minimap-card{border-color:rgba(255,255,255,.09)!important;box-shadow:0 18px 44px rgba(0,0,0,.30)!important;background:rgba(3,9,12,.74)!important}
+.drive-hud{height:62px;border-radius:21px;border-color:rgba(255,255,255,.09);background:linear-gradient(145deg,rgba(3,9,12,.75),rgba(8,16,19,.60));box-shadow:0 15px 42px rgba(0,0,0,.28),inset 0 1px rgba(255,255,255,.035)}
+#speed{font-size:30px}.gear{color:var(--drive-accent)}
+.dyn.grip{color:color-mix(in srgb,var(--drive-accent) 80%,white);border-color:color-mix(in srgb,var(--drive-accent) 20%,transparent)}
+.steer-track{background:linear-gradient(180deg,rgba(5,12,15,.55),rgba(3,8,10,.38));border-color:rgba(255,255,255,.11);box-shadow:inset 0 1px rgba(255,255,255,.03),0 10px 28px rgba(0,0,0,.14)}
+.steer-knob{background:linear-gradient(145deg,#f8fbfb,#dce5e5);box-shadow:0 12px 30px rgba(0,0,0,.31),inset 0 1px white}
+.pedal.gas{background:linear-gradient(145deg,color-mix(in srgb,var(--drive-accent) 90%,white),color-mix(in srgb,var(--drive-accent) 72%,#378f79))!important;color:#07120f!important;box-shadow:0 15px 34px color-mix(in srgb,var(--drive-accent) 16%,rgba(0,0,0,.28)),inset 0 1px rgba(255,255,255,.45)!important}
+.pedal.brake{background:linear-gradient(145deg,rgba(24,26,27,.78),rgba(7,11,13,.72));border-color:rgba(255,139,130,.18);box-shadow:0 14px 32px rgba(0,0,0,.28),inset 0 1px rgba(255,255,255,.035)}
+.area-ribbon{background:linear-gradient(145deg,rgba(4,11,15,.88),rgba(7,17,21,.72))!important;border-color:color-mix(in srgb,var(--drive-accent) 18%,rgba(255,255,255,.07))!important;box-shadow:0 22px 55px rgba(0,0,0,.30)!important}
+.area-ribbon strong{color:color-mix(in srgb,var(--drive-accent) 70%,white)}
+.discovery-card{border-color:color-mix(in srgb,var(--drive-accent) 15%,rgba(255,255,255,.08))!important;background:linear-gradient(145deg,rgba(4,11,15,.93),rgba(7,16,20,.84))!important;box-shadow:0 22px 60px rgba(0,0,0,.38)!important}
+.discovery-card>span{color:var(--drive-accent)!important}
+.loader-wrap{background:radial-gradient(circle at 50% 40%,#10282b 0,#081419 34%,#03080b 100%)!important}
+.loader-card{border-color:rgba(255,255,255,.08)!important;background:linear-gradient(145deg,rgba(10,21,25,.88),rgba(4,10,13,.82))!important;box-shadow:0 30px 100px rgba(0,0,0,.48)!important}
+.loader-logo{background:linear-gradient(135deg,var(--drive-accent),var(--drive-accent-2))!important;color:#061210!important;box-shadow:0 0 0 7px color-mix(in srgb,var(--drive-accent) 8%,transparent),0 18px 45px color-mix(in srgb,var(--drive-accent) 18%,transparent)!important}
+.progress-bar{background:linear-gradient(90deg,var(--drive-accent),var(--drive-accent-2))!important}
+
+.journey-postcard{position:fixed;inset:0;z-index:88;display:grid;place-items:center;padding:16px;background:rgba(2,6,9,.62);backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);opacity:0;pointer-events:none;transition:.25s ease}
+.journey-postcard.show{opacity:1;pointer-events:auto}.journey-postcard-card{width:min(470px,calc(100vw - 28px));border:1px solid rgba(255,255,255,.11);border-radius:27px;overflow:hidden;background:#071014;box-shadow:0 35px 120px rgba(0,0,0,.62)}
+.postcard-sky{height:106px;padding:16px 18px;display:flex;align-items:flex-start;justify-content:space-between;background:radial-gradient(circle at 15% 130%,color-mix(in srgb,var(--drive-accent) 58%,transparent),transparent 42%),radial-gradient(circle at 88% -10%,color-mix(in srgb,var(--drive-accent-2) 55%,transparent),transparent 42%),linear-gradient(135deg,#153545,#0a1923 52%,#091217);color:rgba(255,255,255,.76);font-size:8px;font-weight:900;letter-spacing:.16em}
+.postcard-sky b{padding:5px 8px;border:1px solid rgba(255,255,255,.18);border-radius:999px;background:rgba(0,0,0,.18);font-size:7px;letter-spacing:.11em}
+.postcard-copy{padding:19px}.postcard-copy h2{margin:5px 0 2px;font-size:25px;letter-spacing:-.04em}.postcard-copy>p{margin:0;color:rgba(255,255,255,.52);font-size:10px}.postcard-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;margin:16px 0 13px}.postcard-stats div{padding:11px 9px;border:1px solid rgba(255,255,255,.075);border-radius:14px;background:rgba(255,255,255,.03)}.postcard-stats strong{display:block;font-size:16px;color:color-mix(in srgb,var(--drive-accent) 72%,white)}.postcard-stats span{display:block;margin-top:3px;color:rgba(255,255,255,.38);font-size:6px;font-weight:900;letter-spacing:.1em}.postcard-copy>small{display:block;color:rgba(255,255,255,.55);font-size:9px;line-height:1.45}.postcard-actions{display:grid;grid-template-columns:1fr 1.25fr;gap:8px;margin-top:15px}.postcard-actions button{height:43px;border-radius:13px;border:1px solid rgba(255,255,255,.09);background:rgba(255,255,255,.055);font-size:10px;font-weight:850}.postcard-actions button.primary{border:0;background:linear-gradient(135deg,var(--drive-accent),var(--drive-accent-2));color:#06110f}
+
+body.in-tunnel:after{background:radial-gradient(ellipse at 50% 70%,rgba(255,190,104,.055),transparent 45%),linear-gradient(to bottom,rgba(0,0,0,.14),rgba(0,0,0,.23));opacity:.9}
+@media(max-height:420px){.journey-postcard-card{max-height:calc(100dvh - 18px);overflow:auto}.postcard-sky{height:78px}.postcard-copy{padding:14px}.postcard-stats{margin:10px 0}.postcard-actions{margin-top:10px}}
+
+/* Navigation occupies the quiet centre strip instead of fighting the camera/settings buttons. */
+.nav-banner{left:calc(205px + var(--safe-left));right:auto;width:min(430px,calc(100vw - 433px));transform:translateY(-8px)}
+.nav-banner.show{transform:translateY(0)}
+body.navigating .weather-badge{opacity:0!important;transform:translateX(-50%) translateY(-8px)!important}
+@media (orientation:landscape) and (max-width:760px){.nav-banner{left:calc(194px + var(--safe-left));width:calc(100vw - 374px - var(--safe-left) - var(--safe-right));max-width:none}.nav-copy>span{max-width:105px}}
+@media (orientation:landscape) and (max-width:710px){.nav-banner{left:calc(190px + var(--safe-left));width:calc(100vw - 362px - var(--safe-left) - var(--safe-right))}}
+@media (orientation:landscape) and (max-width:760px){.nav-banner{left:calc(194px + var(--safe-left));width:calc(100vw - 404px - var(--safe-left) - var(--safe-right));max-width:none}}
+@media (orientation:landscape) and (max-width:710px){.nav-banner{left:calc(190px + var(--safe-left));width:calc(100vw - 390px - var(--safe-left) - var(--safe-right))}}

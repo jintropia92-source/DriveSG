@@ -10,7 +10,7 @@
   <meta name="format-detection" content="telephone=no" />
   <meta name="color-scheme" content="dark" />
   <title>DriveSG — Singapore, playable.</title>
-  <link rel="stylesheet" href="styles.css?b=20260901experience1" />
+  <link rel="stylesheet" href="styles.css?b=20260901v2" />
   <script>window.DRIVESG_CONFIG={backendBase:'https://drivesg-api.vercel.app'};</script>
 </head>
 <body>
@@ -50,6 +50,7 @@
         <strong id="navRemaining">—</strong>
         <span id="navEta">—</span>
       </div>
+      <div class="nav-progress" aria-hidden="true"><i id="navProgressBar"></i></div>
       <button id="cancelNavBtn" class="nav-close" type="button" aria-label="Cancel navigation">×</button>
     </section>
 
@@ -69,8 +70,8 @@
       <div class="panel-head">
         <div>
           <div class="eyebrow">DRIVESG NAVIGATION</div>
-          <h1 id="panelTitle">Where do you want to go?</h1>
-          <p id="panelIntro">Pick a destination and DriveSG will guide you there. Use “Start here” only when you want to teleport to a different starting area.</p>
+          <h1 id="panelTitle">Where in Singapore?</h1>
+          <p id="panelIntro">Choose a destination, scenic drive, or starting area.</p>
         </div>
         <button id="closePanelBtn" class="close-btn" type="button" aria-label="Close places">×</button>
       </div>
@@ -122,20 +123,23 @@
       <section id="discoverSection" class="discover-section hidden" aria-label="Discover Singapore">
         <div class="discover-panel-head">
           <button id="discoverBackBtn" class="discover-back" type="button">‹ Back</button>
-          <div><span class="section-label">DISCOVER SINGAPORE</span><strong>Drive it like a visitor</strong></div>
+          <div><span class="section-label">DISCOVER SINGAPORE</span><strong>See Singapore by road</strong></div>
         </div>
         <div class="passport-card">
           <div><span>SINGAPORE PASSPORT</span><strong id="passportProgress">0 / 0 places discovered</strong></div>
           <div class="passport-track"><i id="passportBar"></i></div>
         </div>
-        <p class="discover-intro">These are relaxed guided drives, not races. Drive normally and DriveSG will point out neighbourhoods, landmarks and Singapore road culture as you pass them.</p>
+        <p class="discover-intro">Relaxed scenic drives through Singapore’s different neighbourhoods, landmarks and road environments.</p>
         <div id="guidedDriveGrid" class="guided-drive-grid"></div>
       </section>
 
       <div class="panel-foot">
         <span class="status-dot"></span>
-        <span>DriveSG backend · OpenStreetMap world · Singapore only</span>
-        <button id="shareBtn" class="panel-share" type="button">Share / Install</button>
+        <span>Singapore, playable.</span>
+        <div class="panel-foot-actions">
+          <button id="creditsBtn" class="panel-share quiet" type="button">Credits</button>
+          <button id="shareBtn" class="panel-share" type="button">Share / Install</button>
+        </div>
       </div>
     </aside>
 
@@ -152,6 +156,27 @@
       <strong id="discoveryTitle">Marina Bay Sands</strong>
       <p id="discoveryText">One of Singapore's most recognisable skyline landmarks.</p>
       <small id="discoveryDriveNote">Singapore drives on the left.</small>
+    </section>
+
+    <section id="journeyPostcard" class="journey-postcard" role="dialog" aria-modal="true" aria-labelledby="journeyPostcardTitle">
+      <div class="journey-postcard-card">
+        <div class="postcard-sky"><span>DRIVESG · SINGAPORE</span><b id="journeyPostcardBadge">SCENIC DRIVE COMPLETE</b></div>
+        <div class="postcard-copy">
+          <span class="section-label">JOURNEY COMPLETE</span>
+          <h2 id="journeyPostcardTitle">Skyline to Orchard</h2>
+          <p id="journeyPostcardRoute">Marina Bay → Orchard</p>
+          <div class="postcard-stats">
+            <div><strong id="journeyPostcardTime">12 min</strong><span>DRIVE TIME</span></div>
+            <div><strong id="journeyPostcardLandmarks">4</strong><span>LANDMARKS</span></div>
+            <div><strong id="journeyPostcardPassport">8 / 28</strong><span>PASSPORT</span></div>
+          </div>
+          <small id="journeyPostcardNote">You’ve experienced another side of Singapore.</small>
+          <div class="postcard-actions">
+            <button id="journeyContinueBtn" type="button">Keep driving</button>
+            <button id="journeyAnotherBtn" class="primary" type="button">Another scenic drive</button>
+          </div>
+        </div>
+      </div>
     </section>
 
     <section id="hopMapOverlay" class="hop-map-overlay" role="dialog" aria-modal="true" aria-labelledby="hopMapTitle">
@@ -225,7 +250,7 @@
       </div>
     </section>
 
-    <div id="driveHint" class="drive-hint">Slide left / right to steer&nbsp;&nbsp;·&nbsp;&nbsp;Hold GO to accelerate</div>
+    <div id="driveHint" class="drive-hint">Slide to steer&nbsp;&nbsp;·&nbsp;&nbsp;GO to accelerate&nbsp;&nbsp;·&nbsp;&nbsp;Hold BRAKE at a stop to reverse</div>
 
     <section id="mobileControls" class="drive-controls" aria-label="Driving controls">
       <div id="steerZone" class="steer-zone" aria-label="Steering pad">
@@ -250,15 +275,31 @@
         <h2 id="loaderTitle">Building Singapore</h2>
         <p id="loaderText">Preparing Marina Bay…</p>
         <div class="progress-track"><div id="progressBar" class="progress-bar"></div></div>
-        <div class="progress-meta"><span id="progressLabel">0%</span><span>iPhone mode</span></div>
+        <div class="progress-meta"><span id="progressLabel">0%</span><span>Preparing the drive</span></div>
       </div>
     </div>
 
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
-    <footer class="attribution"><a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">© OpenStreetMap</a><span class="attr-sep">·</span><span class="onemap-credit"><img src="https://www.onemap.gov.sg/web-assets/images/logo/om_logo.png" alt="" /><a href="https://www.onemap.gov.sg/" target="_blank" rel="noopener">OneMap</a> © contributors | <a href="https://www.sla.gov.sg/" target="_blank" rel="noopener">Singapore Land Authority</a></span><span id="routingCredit"></span><span class="terrain-credit"> · Terrain <a href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo</a> / Copernicus DEM</span></footer>
+    <button id="creditsChip" class="credits-chip" type="button" aria-label="Map and data credits">ⓘ</button>
+    <span id="routingCredit" class="hidden-credit" aria-hidden="true"></span>
+
+    <section id="creditsOverlay" class="credits-overlay" role="dialog" aria-modal="true" aria-labelledby="creditsTitle">
+      <div class="credits-card">
+        <button id="creditsCloseBtn" class="credits-close" type="button" aria-label="Close credits">×</button>
+        <span class="credits-kicker">DRIVESG CREDITS</span>
+        <h2 id="creditsTitle">Built from real Singapore map data</h2>
+        <p>DriveSG combines open mapping, Singapore basemap services, terrain and weather data to create its virtual driving world.</p>
+        <div class="credits-links">
+          <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap contributors</a>
+          <a href="https://www.onemap.gov.sg/" target="_blank" rel="noopener">OneMap / Singapore Land Authority</a>
+          <a href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo / Copernicus terrain</a>
+        </div>
+        <small>These services provide map/data inputs. DriveSG is an independent driving experience.</small>
+      </div>
+    </section>
   </main>
 
-  <script src="boot.js?b=20260901experience1"></script>
+  <script src="boot.js?b=20260901v2"></script>
 </body>
 </html>
