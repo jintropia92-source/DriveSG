@@ -1,15 +1,14 @@
 (() => {
   'use strict';
 
-  const BUILD_ID = '20260901fix2';
-  const SG_BOUNDS = { minLat: 1.16, maxLat: 1.456, minLon: 103.60, maxLon: 104.10 };
+  const BUILD_ID = '20260901toa2';
+  const SG_BOUNDS = { minLat: 1.3270, maxLat: 1.3425, minLon: 103.8420, maxLon: 103.8595 }; // compact Toa Payoh core only
   const CONFIG = window.DRIVESG_CONFIG || {};
   const OVERPASS_ENDPOINTS = Array.isArray(CONFIG.overpassEndpoints) && CONFIG.overpassEndpoints.length
     ? CONFIG.overpassEndpoints
     : ['https://overpass-api.de/api/interpreter','https://overpass.kumi.systems/api/interpreter'];
   // External data providers are kept configurable so a managed/private backend can replace public demo services
   // without rewriting the driving, navigation or UI layers.
-  const ROUTE_ENDPOINT = CONFIG.routeEndpoint || 'https://router.project-osrm.org/route/v1/driving';
   const GEOCODE_ENDPOINT = CONFIG.geocodeEndpoint || 'https://nominatim.openstreetmap.org/search';
   const BACKEND_BASE = String(CONFIG.backendBase || '').replace(/\/$/, '');
   const BACKEND_ACTIVE = Boolean(BACKEND_BASE);
@@ -20,7 +19,7 @@
   };
   const ELEVATION_ENDPOINT = 'https://api.open-meteo.com/v1/elevation';
   const TERRAIN_GRID_SIZE = 7;
-  const TERRAIN_SPAN_METERS = 3200;
+  const TERRAIN_SPAN_METERS = 2400;
   const ONEMAP_MIN_ZOOM = 11;
   const ONEMAP_MAX_ZOOM = 19;
   const ONEMAP_TILE_SIZE = 256;
@@ -32,12 +31,12 @@
   const NAV_UPDATE_SECONDS = .14;
   const ROUTE_PREFETCH_METERS = 520;
   const ROUTE_PREFETCH_INTERVAL = 12;
-  const MAX_BUILDING_WINDOWS = 9200;
-  const MAX_FACADE_BUILDINGS = 280;
-  const MAX_FACADE_DETAILS = 5200;
-  const MAX_ROAD_NAME_SIGNS = 14;
-  const MAX_TROPICAL_PLANTS = 125;
-  const MAX_STREET_LIGHTS = 180;
+  const MAX_BUILDING_WINDOWS = 24000;
+  const MAX_FACADE_BUILDINGS = 850;
+  const MAX_FACADE_DETAILS = 16000;
+  const MAX_ROAD_NAME_SIGNS = 22;
+  const MAX_TROPICAL_PLANTS = 240;
+  const MAX_STREET_LIGHTS = 230;
   const BRIDGE_BASE_HEIGHT = 5.4;
   const PERFORMANCE_TARGET_FPS = 50;
   const GRAPHICS_TIER_COOLDOWN = 8;
@@ -46,116 +45,88 @@
   const RAIN_PARTICLES_PERFORMANCE = 300;
 
   const PRESETS = [
-    { name: 'Marina Bay', subtitle: 'Skyline & waterfront', lat: 1.2829, lon: 103.8587 },
-    { name: 'Orchard', subtitle: 'Orchard Road', lat: 1.3048, lon: 103.8321 },
-    { name: 'CBD', subtitle: 'Raffles Place', lat: 1.2837, lon: 103.8514 },
-    { name: 'Changi', subtitle: 'Airport district', lat: 1.3552, lon: 103.9869 },
-    { name: 'Sentosa', subtitle: 'Island drive', lat: 1.2549, lon: 103.8238 },
-    { name: 'Toa Payoh', subtitle: 'Heartland roads', lat: 1.3344, lon: 103.8497 },
-    { name: 'Jurong East', subtitle: 'West side', lat: 1.3331, lon: 103.7422 },
-    { name: 'Woodlands', subtitle: 'North side', lat: 1.4367, lon: 103.7862 }
+    { name: 'Town Centre', subtitle: 'HDB Hub & Toa Payoh Mall', lat: 1.33220, lon: 103.84810 },
+    { name: 'Dragon Playground', subtitle: 'Lorong 6', lat: 1.33194, lon: 103.85439 },
+    { name: 'Town Park', subtitle: 'Lookout tower & gardens', lat: 1.33058, lon: 103.84788 },
+    { name: 'Shuang Lin Monastery', subtitle: 'Jalan Toa Payoh', lat: 1.33028, lon: 103.85750 },
+    { name: 'Central Horizon', subtitle: 'Golden-crown blocks', lat: 1.33465, lon: 103.84846 },
+    { name: 'VIP Block 53', subtitle: 'Lorong 5', lat: 1.33780, lon: 103.85079 }
   ];
 
-  const CHALLENGES = [
-    { id:'marina-orchard', name:'Marina Sprint', difficulty:'CITY', start:{name:'Marina Bay',subtitle:'Challenge start',lat:1.2829,lon:103.8587}, finish:{name:'Orchard',subtitle:'Challenge finish',lat:1.3048,lon:103.8321} },
-    { id:'orchard-sentosa', name:'Island Escape', difficulty:'SCENIC', start:{name:'Orchard',subtitle:'Challenge start',lat:1.3048,lon:103.8321}, finish:{name:'Sentosa',subtitle:'Challenge finish',lat:1.2549,lon:103.8238} },
-    { id:'toa-orchard', name:'Heartland Run', difficulty:'URBAN', start:{name:'Toa Payoh',subtitle:'Challenge start',lat:1.3344,lon:103.8497}, finish:{name:'Orchard',subtitle:'Challenge finish',lat:1.3048,lon:103.8321} },
-    { id:'cbd-jurong', name:'Westbound', difficulty:'LONG', start:{name:'CBD',subtitle:'Challenge start',lat:1.2837,lon:103.8514}, finish:{name:'Jurong East',subtitle:'Challenge finish',lat:1.3331,lon:103.7422} },
-    { id:'toa-woodlands', name:'Northbound', difficulty:'LONG', start:{name:'Toa Payoh',subtitle:'Challenge start',lat:1.3344,lon:103.8497}, finish:{name:'Woodlands',subtitle:'Challenge finish',lat:1.4367,lon:103.7862} },
-    { id:'marina-changi', name:'Airport Express', difficulty:'EPIC', start:{name:'Marina Bay',subtitle:'Challenge start',lat:1.2829,lon:103.8587}, finish:{name:'Jewel Changi Airport',subtitle:'Challenge finish',lat:1.3602,lon:103.9896} }
-  ];
+  const CHALLENGES = []; // focused prototype uses relaxed local drives only
 
   const DISCOVERY_ZONES = [
-    {id:'marina-bay',name:'Marina Bay',lat:1.2837,lon:103.8583,radius:1150,tagline:'Singapore’s modern waterfront',text:'A compact loop of skyline landmarks, reclaimed waterfront and ceremonial city streets.',tip:'Singapore drives on the left; keep left unless overtaking.'},
-    {id:'civic',name:'Civic District',lat:1.2916,lon:103.8523,radius:720,tagline:'Historic civic core',text:'Colonial-era civic buildings sit beside the Singapore River and the modern CBD.',tip:'City-centre junctions can be wide; follow lane arrows and signal phases.'},
-    {id:'orchard',name:'Orchard Road',lat:1.3044,lon:103.8337,radius:1050,tagline:'Singapore’s shopping belt',text:'A dense boulevard of malls, hotels, offices and tree-lined side streets.',tip:'Expect frequent junctions and lane changes on major urban roads.'},
-    {id:'chinatown',name:'Chinatown',lat:1.2839,lon:103.8439,radius:720,tagline:'Shophouses beside the CBD',text:'Older street grids and low-rise shophouse districts sit just minutes from the skyscrapers.',tip:'Older central streets are tighter than the big arterial roads around them.'},
-    {id:'kampong-glam',name:'Kampong Glam',lat:1.3023,lon:103.8593,radius:620,tagline:'Historic Malay-Arab quarter',text:'A colourful low-rise district between Bugis, Rochor and the city centre.',tip:'Slow down when moving from major roads into compact heritage streets.'},
-    {id:'little-india',name:'Little India',lat:1.3067,lon:103.8517,radius:650,tagline:'Colourful historic streets',text:'A dense district of conserved streets, shops and landmarks north of the city core.',tip:'Singapore road names and direction signs are predominantly in English.'},
-    {id:'toa-payoh',name:'Toa Payoh',lat:1.3344,lon:103.8497,radius:1250,tagline:'Heartland Singapore',text:'One of Singapore’s best-known mature housing towns, with HDB blocks, town-centre roads and neighbourhood streets.',tip:'Heartland driving feels different from downtown: lower-rise, greener and more residential.'},
-    {id:'harbourfront',name:'HarbourFront',lat:1.2653,lon:103.8217,radius:900,tagline:'City meets the southern harbour',text:'The mainland gateway to Sentosa, with port views, malls and the slopes around Mount Faber.',tip:'Southern Singapore is noticeably hillier than the reclaimed downtown waterfront.'},
-    {id:'sentosa',name:'Sentosa',lat:1.2528,lon:103.8305,radius:2100,tagline:'Island resort roads',text:'A greener, lower-speed driving environment separated from the dense city by the harbour.',tip:'This is a leisure island, so the road feel is slower and more landscaped.'},
-    {id:'east-coast',name:'East Coast',lat:1.3075,lon:103.9185,radius:2500,tagline:'Coastal expressway corridor',text:'Longer roads, coastal greenery and the fast east-west run toward Changi.',tip:'Expressways use green direction signs and higher speed limits than city streets.'},
-    {id:'changi',name:'Changi',lat:1.3555,lon:103.9867,radius:1850,tagline:'Singapore’s airport gateway',text:'Wide airport roads, landscaped verges and the distinctive approach to Changi Airport.',tip:'Airport approaches are broad and highly signposted; choose lanes early.'},
-    {id:'jurong-east',name:'Jurong East',lat:1.3331,lon:103.7422,radius:1400,tagline:'West-side regional centre',text:'A dense western town centre surrounded by mature housing and major arterial roads.',tip:'Singapore’s urban form is polycentric: major centres exist well beyond downtown.'},
-    {id:'woodlands',name:'Woodlands',lat:1.4367,lon:103.7862,radius:1400,tagline:'Northern Singapore',text:'A northern regional centre close to the Johor Strait and the Malaysia crossing.',tip:'The island is compact: a city-to-north drive can cross very different neighbourhoods quickly.'}
+    {id:'town-centre',name:'Town Centre',lat:1.3322,lon:103.8487,radius:430,tagline:'The heart of Toa Payoh',text:'HDB Hub, shops and the town-centre streets sit at the core.',tip:'Watch the short junctions and bus-stop lanes.'},
+    {id:'lorong-west',name:'Lorong 1 & 2',lat:1.3332,lon:103.8448,radius:520,tagline:'Older HDB streets',text:'Curved and slab blocks make this side of Toa Payoh feel distinctly old-school.',tip:'Residential roads are narrower and calmer.'},
+    {id:'lorong-east',name:'Lorong 5 & 6',lat:1.3341,lon:103.8530,radius:620,tagline:'Classic heartland',text:'Iconic early HDB blocks, playgrounds and everyday neighbourhood roads.',tip:'Slow down around local junctions and service roads.'},
+    {id:'north',name:'Toa Payoh North',lat:1.3402,lon:103.8488,radius:560,tagline:'Quieter residential edge',text:'Greener streets and mature housing lead toward Braddell.',tip:'The road rhythm becomes more residential here.'}
   ];
 
   const GUIDED_DRIVES = [
-    {id:'icons-heritage',name:'Skyline to Orchard',kicker:'BEST FIRST DRIVE',duration:'10–15 min',summary:'Marina Bay, the Civic District, Raffles Hotel and Orchard in one relaxed city drive.',
-      start:{name:'Marina Bay',lat:1.2829,lon:103.8587},finish:{name:'Orchard',lat:1.3048,lon:103.8321},
-      via:[{lat:1.2862,lon:103.8531},{lat:1.2910,lon:103.8520},{lat:1.2947,lon:103.8545}],highlights:['mbs','merlion','fullerton','gallery','raffleshotel','ion']},
-    {id:'heartland',name:'City to Heartland',kicker:'EVERYDAY SINGAPORE',duration:'10–15 min',summary:'Leave the shopping belt and see the transition into mature HDB neighbourhoods.',
-      start:{name:'Orchard',lat:1.3048,lon:103.8321},finish:{name:'Toa Payoh',lat:1.3344,lon:103.8497},
-      via:[{lat:1.3168,lon:103.8437},{lat:1.3270,lon:103.8483}],highlights:['ion','hdbhub']},
-    {id:'southern',name:'CBD to Sentosa',kicker:'SOUTHERN WATERFRONT',duration:'10–15 min',summary:'Skyscrapers, Tanjong Pagar, public housing, harbour roads and the island gateway.',
-      start:{name:'CBD',lat:1.2837,lon:103.8514},finish:{name:'Sentosa',lat:1.2549,lon:103.8238},
-      via:[{lat:1.2768,lon:103.8418},{lat:1.2650,lon:103.8223}],highlights:['ocbc','pinnacle','vivocity']},
-    {id:'airport',name:'City to Changi',kicker:'THE AIRPORT RUN',duration:'20–30 min',summary:'A longer drive that shifts from downtown density to Kallang, the east coast corridor and Changi.',
-      start:{name:'Marina Bay',lat:1.2829,lon:103.8587},finish:{name:'Jewel Changi Airport',lat:1.3602,lon:103.9896},
-      via:[{lat:1.3037,lon:103.8750},{lat:1.3070,lon:103.9150},{lat:1.3370,lon:103.9610}],highlights:['mbs','sportshub','jewel']},
-    {id:'heritage',name:'Heritage Districts',kicker:'OLD & NEW SINGAPORE',duration:'12–18 min',summary:'A compact cross-city drive linking Chinatown, the Civic District, Kampong Glam and Little India.',
-      start:{name:'Chinatown',lat:1.2839,lon:103.8439},finish:{name:'Little India',lat:1.3067,lon:103.8517},
-      via:[{lat:1.2906,lon:103.8516},{lat:1.3023,lon:103.8593}],highlights:['gallery','raffleshotel']}
+    {id:'first-drive',name:'First Drive',kicker:'BEST START',duration:'5–8 min',summary:'Town Centre → Town Park → Dragon Playground.',
+      start:{name:'Town Centre',lat:1.33205,lon:103.84850},finish:{name:'Dragon Playground',lat:1.33194,lon:103.85439},
+      via:[{lat:1.33058,lon:103.84788},{lat:1.3309,lon:103.8518}],highlights:['hdbhub','townpark','dragon']},
+    {id:'heritage-loop',name:'Heritage Drive',kicker:'OLD TOA PAYOH',duration:'8–12 min',summary:'VIP Block → Town Centre → Dragon Playground → Shuang Lin.',
+      start:{name:'VIP Block 53',lat:1.33780,lon:103.85079},finish:{name:'Shuang Lin Monastery',lat:1.33028,lon:103.85750},
+      via:[{lat:1.3331,lon:103.8449},{lat:1.33239,lon:103.84743},{lat:1.33194,lon:103.85439}],highlights:['vip53','block157','toapayohmall','dragon','shuanglin']},
+    {id:'heartland-loop',name:'Heartland Loop',kicker:'EVERYDAY STREETS',duration:'6–9 min',summary:'Central Horizon → Lorong 1 → Town Park → Town Centre.',
+      start:{name:'Central Horizon',lat:1.33465,lon:103.84846},finish:{name:'Town Centre',lat:1.33205,lon:103.84850},
+      via:[{lat:1.33180,lon:103.84490},{lat:1.33058,lon:103.84788}],highlights:['centralhorizon','block157','townpark','hdbhub']}
   ];
 
   const LANDMARK_INFO = {
-    mbs:{text:'Marina Bay Sands anchors Singapore’s modern waterfront skyline with its three towers and rooftop skypark.',note:'The surrounding roads sit on reclaimed waterfront land and connect quickly into the CBD.'},
-    merlion:{text:'The Merlion is one of Singapore’s best-known symbols, facing Marina Bay from the historic river mouth.',note:'The Fullerton and Esplanade area is a useful visual reference for finding the Civic District.'},
-    artscience:{text:'The lotus-shaped ArtScience Museum sits beside Marina Bay Sands on the waterfront.',note:'Bayfront roads mix tourist traffic, underground links and broad signalised junctions.'},
-    fullerton:{text:'The Fullerton Hotel occupies the former General Post Office building beside the Singapore River.',note:'You are crossing from the modern bay into the older civic and river districts.'},
-    gallery:{text:'National Gallery Singapore occupies the former Supreme Court and City Hall buildings.',note:'This is Singapore’s Civic District: slower streets, historic buildings and major public spaces.'},
-    raffleshotel:{text:'Raffles Hotel is a historic landmark near Bras Basah and Beach Road.',note:'The city grid changes quickly here between the Civic District, Bugis and Orchard approaches.'},
-    ion:{text:'ION Orchard marks the Orchard Road and Scotts Road junction at the heart of the shopping belt.',note:'Orchard is boulevard driving: frequent lights, multiple lanes and closely spaced destinations.'},
-    hdbhub:{text:'HDB Hub sits in Toa Payoh, one of Singapore’s classic mature public-housing towns.',note:'This is the heartland pattern visitors often miss: HDB blocks, town centres and green neighbourhood roads.'},
-    pinnacle:{text:'The Pinnacle@Duxton is a distinctive high-rise public-housing development near Tanjong Pagar.',note:'It shows how public housing and the CBD can sit almost side by side in Singapore.'},
-    sportshub:{text:'Singapore Sports Hub and the National Stadium form a large landmark beside Kallang Basin.',note:'The eastward drive opens up here before the longer coastal and airport corridors.'},
-    vivocity:{text:'VivoCity is the major HarbourFront mall beside the port and Sentosa gateway.',note:'From here the urban mainland gives way to the greener resort-island road environment.'},
-    jewel:{text:'Jewel Changi Airport is the glass-domed complex linking Changi Airport terminals.',note:'Changi approaches are wide, landscaped and designed around clear airport wayfinding.'},
-    flyer:{text:'The Singapore Flyer sits on the edge of Marina Bay and Kallang Basin.',note:'Its height makes it a useful orientation landmark while driving around the bay.'},
-    helix:{text:'The Helix Bridge is the pedestrian bridge connecting Marina Centre with the Bayfront area.',note:'The road network around it loops around the bay rather than crossing directly.'},
-    ocbc:{text:'OCBC Centre is part of the dense Raffles Place skyline in Singapore’s financial core.',note:'CBD roads are short, signal-heavy and surrounded by tall building canyons.'}
+    hdbhub:{text:'The town-centre anchor.',note:''},
+    dragon:{text:'Toa Payoh’s iconic mosaic dragon playground.',note:''},
+    townpark:{text:'A green landmark beside the town centre.',note:''},
+    vip53:{text:'The distinctive Y-shaped early HDB block.',note:''},
+    block157:{text:'A long curved HDB block from the early town.',note:''},
+    centralhorizon:{text:'Five tall blocks with distinctive crown forms.',note:''},
+    toapayohmall:{text:'The familiar town-centre pedestrian mall and yellow gateway.',note:''},
+    shuanglin:{text:'A historic Buddhist monastery with traditional roofs and a seven-storey pagoda.',note:''}
   };
 
   const VISUAL_PROFILES = {
-    default:{accent:'#79e7c4',accent2:'#a6d8ff',skyWarm:'#8ab3c3',building:0xc7c0b3,glass:0x8fa3ad,green:0x567459},
-    'marina-bay':{accent:'#70e8d0',accent2:'#7cb8ff',skyWarm:'#7da9c8',building:0xc4c8c8,glass:0x7898a8,green:0x53775f},
-    civic:{accent:'#e6c589',accent2:'#9fd2db',skyWarm:'#b19b8e',building:0xd6c9b2,glass:0x738f99,green:0x5d7558},
-    orchard:{accent:'#dfc7ff',accent2:'#7de4d0',skyWarm:'#9b91aa',building:0xcbc7c0,glass:0x667f92,green:0x54775b},
-    chinatown:{accent:'#f3b36f',accent2:'#ef7c70',skyWarm:'#b68b77',building:0xd1b99d,glass:0x6e8387,green:0x5e7455},
-    'kampong-glam':{accent:'#e7bd67',accent2:'#7dd0d8',skyWarm:'#b6a47e',building:0xd7c6a6,glass:0x70898e,green:0x5d7757},
-    'little-india':{accent:'#f08cb9',accent2:'#f0c56b',skyWarm:'#b78da1',building:0xd2b6ad,glass:0x74868f,green:0x587753},
-    'toa-payoh':{accent:'#9fe0a9',accent2:'#87c8e6',skyWarm:'#97b2a2',building:0xcac7b9,glass:0x77909a,green:0x577b56},
-    harbourfront:{accent:'#77d9cf',accent2:'#80b9e8',skyWarm:'#7ca6b0',building:0xbfc5c3,glass:0x708c98,green:0x50775b},
-    sentosa:{accent:'#8ee2b1',accent2:'#6fd8e9',skyWarm:'#83b7ac',building:0xc5c8bc,glass:0x79929a,green:0x4f7d55},
-    'east-coast':{accent:'#77d9c5',accent2:'#86c9ff',skyWarm:'#7eb2bd',building:0xc5c9c5,glass:0x78939d,green:0x4d7957},
-    changi:{accent:'#87e2be',accent2:'#83c9ff',skyWarm:'#82b4ba',building:0xc6c9c4,glass:0x75949e,green:0x4f7c59},
-    'jurong-east':{accent:'#8fc8ff',accent2:'#95e0bf',skyWarm:'#8caab7',building:0xc2c7c6,glass:0x748d98,green:0x56765c},
-    woodlands:{accent:'#91d6ae',accent2:'#85bfe4',skyWarm:'#8faeaa',building:0xc8c7bb,glass:0x788f98,green:0x587757}
+    default:{accent:'#a9e7b2',accent2:'#8ecded',skyWarm:'#9cb8a7',building:0xcdcabd,glass:0x78929c,green:0x587d57},
+    'town-centre':{accent:'#b8efbe',accent2:'#8fcde9',skyWarm:'#a1b7a8',building:0xd0cabb,glass:0x718b98,green:0x5b7d59},
+    'lorong-west':{accent:'#e9d39b',accent2:'#9bcad8',skyWarm:'#b3a995',building:0xd6cbb5,glass:0x788d93,green:0x607a55},
+    'lorong-east':{accent:'#e6b79c',accent2:'#93d6c2',skyWarm:'#b5a499',building:0xd4c4b5,glass:0x748d95,green:0x5d7d55},
+    north:{accent:'#a7dfae',accent2:'#9bcce8',skyWarm:'#9fb4a5',building:0xcbc9bb,glass:0x76909a,green:0x557b58}
   };
 
   const LANDMARKS = [
-    { name: 'Marina Bay Sands', lat: 1.2834, lon: 103.8607, kind: 'mbs' },
-    { name: 'Singapore Flyer', lat: 1.2893, lon: 103.8631, kind: 'flyer' },
-    { name: 'Esplanade', lat: 1.2897, lon: 103.8553, kind: 'dome' },
-    { name: 'ArtScience Museum', lat: 1.2863, lon: 103.8593, kind: 'artscience' },
-    { name: 'Merlion', lat: 1.2868, lon: 103.8545, kind: 'merlion' },
-    { name: 'Supertree Grove', lat: 1.2816, lon: 103.8636, kind: 'supertrees' },
-    { name: 'Marina Bay Financial Centre', lat: 1.2795, lon: 103.8544, kind: 'mbfc' },
-    { name: 'Fullerton Hotel', lat: 1.2862, lon: 103.8531, kind: 'fullerton' },
-    { name: 'ION Orchard', lat: 1.3040, lon: 103.8319, kind: 'ion' },
-    { name: 'Ngee Ann City', lat: 1.3028, lon: 103.8348, kind: 'ngeeann' },
-    { name: 'Orchard Gateway', lat: 1.3007, lon: 103.8396, kind: 'orchardgateway' },
-    { name: 'Jewel Changi Airport', lat: 1.3602, lon: 103.9896, kind: 'jewel' },
-    { name: 'The Pinnacle@Duxton', lat: 1.2775, lon: 103.8412, kind: 'pinnacle' },
-    { name: 'Singapore Sports Hub', lat: 1.3040, lon: 103.8748, kind: 'sportshub' },
-    { name: 'HDB Hub', lat: 1.3320, lon: 103.8479, kind: 'hdbhub' },
-    { name: 'National Gallery Singapore', lat: 1.2906, lon: 103.8516, kind: 'gallery' },
-    { name: 'Raffles Hotel', lat: 1.2949, lon: 103.8546, kind: 'raffleshotel' },
-    { name: 'VivoCity', lat: 1.2644, lon: 103.8222, kind: 'vivocity' },
-    { name: 'Helix Bridge', lat: 1.2876, lon: 103.8603, kind: 'helix' },
-    { name: 'OCBC Centre', lat: 1.2854, lon: 103.8498, kind: 'ocbc' }
+    { name: 'HDB Hub', lat: 1.33199, lon: 103.84848, kind: 'hdbhub' },
+    { name: 'Dragon Playground', lat: 1.33194, lon: 103.85439, kind: 'dragon' },
+    { name: 'Toa Payoh Town Park', lat: 1.33058, lon: 103.84788, kind: 'townpark' },
+    { name: 'VIP Block 53', lat: 1.33780, lon: 103.85079, kind: 'vip53' },
+    { name: 'Block 157', lat: 1.33180, lon: 103.84490, kind: 'block157' },
+    { name: 'Central Horizon', lat: 1.33465, lon: 103.84846, kind: 'centralhorizon' },
+    { name: 'Toa Payoh Mall', lat: 1.33239, lon: 103.84743, kind: 'toapayohmall' },
+    { name: 'Lian Shan Shuang Lin Monastery', lat: 1.33028, lon: 103.85750, kind: 'shuanglin' }
   ];
+
+  const LANDMARK_REPLACEMENT_RADII = {
+    hdbhub:44, dragon:18, townpark:34, vip53:34, block157:46,
+    centralhorizon:62, toapayohmall:42, shuanglin:58
+  };
+
+  const LANDMARK_COLLIDER_SPECS = {
+    hdbhub:{w:54,d:36,h:92},
+    dragon:{w:26,d:16,h:10},
+    vip53:{w:28,d:30,h:72},
+    block157:{w:62,d:48,h:36},
+    centralhorizon:{w:72,d:28,h:92},
+    toapayohmall:{w:42,d:28,h:12},
+    shuanglin:{w:56,d:42,h:30}
+  };
+
+  function insideCustomLandmarkFootprint(x,z){
+    for(const lm of LANDMARKS){
+      const r=LANDMARK_REPLACEMENT_RADII[lm.kind]||0;if(!r)continue;
+      const p=project(lm.lat,lm.lon);
+      if(Math.hypot(x-p.x,z-p.z)<r)return true;
+    }
+    return false;
+  }
 
   const ROAD_WIDTHS = {
     motorway: 12.5, motorway_link: 8.5, trunk: 11.5, trunk_link: 8.2,
@@ -164,14 +135,14 @@
     living_street: 5.4, service: 5, road: 5
   };
 
-  const ROAD_QUERY = '^(motorway|motorway_link|trunk|trunk_link|primary|primary_link|secondary|secondary_link|tertiary|tertiary_link|residential|unclassified|living_street|service)$';
-  const STREAM_TRIGGER_METERS = 430;
+  const ROAD_QUERY = '^(primary|primary_link|secondary|secondary_link|tertiary|tertiary_link|residential|unclassified|living_street|service)$';
+  const STREAM_TRIGGER_METERS = 99999; // focused town build loads once; no background world swaps
   const STREAM_RETRY_SECONDS = 13;
-  const ROAD_RADIUS_METERS = 1450;
-  const BUILDING_RADIUS_METERS = 720;
-  const SURFACE_RADIUS_METERS = 860;
-  const MAX_BUILDINGS = 950;
-  const SIGNAL_RADIUS_METERS = 900;
+  const ROAD_RADIUS_METERS = 2200;
+  const BUILDING_RADIUS_METERS = 1450;
+  const SURFACE_RADIUS_METERS = 1550;
+  const MAX_BUILDINGS = 1500;
+  const SIGNAL_RADIUS_METERS = 1550;
   const MAX_TRAFFIC_SIGNALS = 140;
   const MAX_CROSSINGS = 140;
   const MAX_BUS_STOPS = 90;
@@ -294,7 +265,7 @@
   let currentDiscoveryZoneId = '';
   let selectedHopPoint = {lat:PRESETS[0].lat,lon:PRESETS[0].lon,name:PRESETS[0].name};
   let hopMapPaintPending = false;
-  let hopMapZoom = 11;
+  let hopMapZoom = 16;
   let cameraLookYaw = 0;
   let cameraLookPitch = 0;
   let cameraLookActive = false;
@@ -873,10 +844,10 @@
     mapMode = 'live';
     setMapState('loading');
     origin = { lat: place.lat, lon: place.lon };
-    currentLocationName = place.name || 'Singapore';
+    currentLocationName = place.name || 'Toa Payoh';
     currentDiscoveryZoneId='';
     els.locationName.textContent = currentLocationName;
-    els.placeEyebrow.textContent = 'DRIVING AROUND';
+    els.placeEyebrow.textContent = '';
     els.searchMsg.textContent = '';
     lastSpeedLimit=null;
     els.speedLimit?.classList.add('hidden');
@@ -889,7 +860,7 @@
     let completed=false;
 
     try {
-      setProgress(16, 'Reading Singapore roads + terrain…');
+      setProgress(16, 'Reading Toa Payoh roads…');
       await nextPaint();
       const [data,terrain] = await Promise.all([
         fetchOsmData(place.lat, place.lon),
@@ -897,11 +868,11 @@
       ]);
       if (generation !== streamGeneration) return false;
       activeTerrainPatch=terrain;
-      setProgress(52, terrain?'Shaping real terrain, roads and buildings…':'Drawing roads and buildings…');
+      setProgress(52, 'Building streets and HDB blocks…');
       await nextPaint();
       const built = buildWorld(data, { centerX: 0, centerZ: 0 }, terrain);
       if (built.roadCount < 3) throw new Error('Not enough road geometry');
-      setProgress(86, `${built.roadCount} roads · ${built.buildingCount} building footprints`);
+      setProgress(86, 'Finishing details…');
       swapDynamicWorld(built);
       warmSceneShaders();
       loadedCenterWorld = { x: 0, z: 0 };
@@ -911,14 +882,14 @@
       setMapState('live');
       setTimeout(hideLoader, 220);
       if (!options.keepPanelOpen) { if(!options.preserveChallenge)setPlaceMode('navigate'); closePanel(); }
-      showToast(`${built.roadCount} roads · ${built.buildingCount} real buildings loaded`);
+      showToast('Toa Payoh ready');
       maybeShowExperienceHint();
       completed=true;
       return true;
     } catch (err) {
-      console.warn('Live road data unavailable. Falling back to bundled demo roads.', err);
+      console.warn('Live road data unavailable. Falling back to local roads.', err);
       if (generation !== streamGeneration) return false;
-      setProgress(64, 'Live map unavailable — loading offline demo roads…');
+      setProgress(64, 'Preparing local roads…');
       await nextPaint();
       try {
         let built;
@@ -926,9 +897,9 @@
           built = buildFallbackWorld();
           swapDynamicWorld(built);
         } catch (fallbackErr) {
-          console.warn('Bundled demo world failed; using emergency road grid.', fallbackErr);
+          console.warn('Local fallback failed; using emergency road grid.', fallbackErr);
           recordDiagnostic('fallback-world-failed',fallbackErr?.message||fallbackErr);
-          setProgress(82, 'Recovering a lightweight offline road grid…');
+          setProgress(82, 'Recovering roads…');
           await nextPaint();
           built = buildEmergencyWorld();
           swapDynamicWorld(built);
@@ -936,10 +907,10 @@
         loadedCenterWorld = { x: 0, z: 0 };
         placeCarNear(0, 0, true);
         mapMode = 'demo';
-        setProgress(100, 'Ready in offline road mode');
+        setProgress(100, 'Ready to drive');
         setMapState('offline');
         setTimeout(hideLoader, 180);
-        showToast('Offline roads ready · live map request failed');
+        showToast('Local roads ready');
         if (!options.keepPanelOpen) { if(!options.preserveChallenge)setPlaceMode('navigate'); closePanel(); }
         completed=true;
         return true;
@@ -948,9 +919,9 @@
         recordDiagnostic('emergency-world-failed',fatalFallbackErr?.message||fatalFallbackErr);
         mapMode='demo';
         setMapState('offline');
-        setProgress(100, 'Could not prepare roads · tap Challenges and try again');
+        setProgress(100, 'Could not load Toa Payoh · try again');
         hideLoader();
-        showToast('Road loading failed · please try the challenge again');
+        showToast('Could not load roads · try again');
         return false;
       }
     } finally {
@@ -1111,11 +1082,85 @@
     return car ? unproject(car.position.x,car.position.z) : {lat:origin.lat,lon:origin.lon};
   }
 
+
+  function localRoadGraphSnapshot(){
+    const nodes=new Map();
+    for(const seg of roadSegments){
+      if(!seg||seg.tunnel)continue;
+      const aGeo=unproject(seg.ax,seg.az),bGeo=unproject(seg.bx,seg.bz);
+      if(!insideSingapore(aGeo.lat,aGeo.lon)||!insideSingapore(bGeo.lat,bGeo.lon))continue;
+      if(seg.fromKey&&!nodes.has(seg.fromKey))nodes.set(seg.fromKey,{x:seg.ax,z:seg.az});
+      if(seg.toKey&&!nodes.has(seg.toKey))nodes.set(seg.toKey,{x:seg.bx,z:seg.bz});
+    }
+    return nodes;
+  }
+
+  function nearestLocalGraphKey(point,nodes){
+    let key=null,best=Infinity;
+    for(const [k,p] of nodes){const d=(p.x-point.x)**2+(p.z-point.z)**2;if(d<best){best=d;key=k;}}
+    return key;
+  }
+
+  function localRouteCost(seg){
+    const len=Math.hypot(seg.bx-seg.ax,seg.bz-seg.az);
+    const factor=/primary/.test(seg.type)?0.94:(/secondary/.test(seg.type)?0.98:(/tertiary/.test(seg.type)?1.0:(/service|living_street/.test(seg.type)?1.28:1.08)));
+    return len*factor;
+  }
+
+  function localGraphPath(startKey,endKey,nodes){
+    if(!startKey||!endKey)return null;
+    const dist=new Map([[startKey,0]]),prev=new Map(),heap=[[0,startKey]];
+    const push=(item)=>{heap.push(item);let i=heap.length-1;while(i>0){const p=(i-1)>>1;if(heap[p][0]<=item[0])break;heap[i]=heap[p];i=p;}heap[i]=item;};
+    const pop=()=>{if(!heap.length)return null;const root=heap[0],last=heap.pop();if(heap.length&&last){heap[0]=last;let i=0;while(true){const l=i*2+1,r=l+1;let b=i;if(l<heap.length&&heap[l][0]<heap[b][0])b=l;if(r<heap.length&&heap[r][0]<heap[b][0])b=r;if(b===i)break;[heap[i],heap[b]]=[heap[b],heap[i]];i=b;}}return root;};
+    let guard=0;
+    while(heap.length&&guard++<18000){
+      const item=pop();if(!item)break;const [d,key]=item;if(d!==(dist.get(key)))continue;if(key===endKey)break;
+      for(const edge of roadGraph.get(key)||[]){
+        const seg=edge.seg;if(!seg||seg.tunnel)continue;
+        const next=edge.dir>0?seg.toKey:seg.fromKey;if(!next||!nodes.has(next))continue;
+        const nd=d+localRouteCost(seg);if(nd<(dist.get(next)??Infinity)){dist.set(next,nd);prev.set(next,{key,seg,dir:edge.dir});push([nd,next]);}
+      }
+    }
+    if(startKey!==endKey&&!prev.has(endKey))return null;
+    const keys=[endKey],edges=[];let k=endKey,guard2=0;
+    while(k!==startKey&&guard2++<8000){const v=prev.get(k);if(!v)return null;edges.push(v);k=v.key;keys.push(k);}keys.reverse();edges.reverse();
+    return {keys,edges};
+  }
+
+  function buildLocalTownRoute(start,destination,via=[]){
+    if(!roadSegments.length||!roadGraph.size)return null;
+    const nodes=localRoadGraphSnapshot();if(nodes.size<3)return null;
+    const checks=[start,...(Array.isArray(via)?via:[]),destination];
+    let allWorld=[],allEdges=[],distance=0;
+    for(let li=0;li<checks.length-1;li++){
+      const a=project(checks[li].lat,checks[li].lon),b=project(checks[li+1].lat,checks[li+1].lon);
+      const ak=nearestLocalGraphKey(a,nodes),bk=nearestLocalGraphKey(b,nodes),path=localGraphPath(ak,bk,nodes);if(!path)return null;
+      const pts=path.keys.map(k=>nodes.get(k)).filter(Boolean);
+      if(!pts.length)return null;
+      if(li===0)allWorld.push(a);
+      for(const q of pts){if(!allWorld.length||Math.hypot(allWorld.at(-1).x-q.x,allWorld.at(-1).z-q.z)>.5)allWorld.push(q);}
+      allWorld.push(b);allEdges.push(...path.edges);
+    }
+    const coords=allWorld.map(q=>unproject(q.x,q.z)).filter(c=>insideSingapore(c.lat,c.lon));
+    if(coords.length<2)return null;
+    for(let i=1;i<coords.length;i++)distance+=haversineMeters(coords[i-1].lat,coords[i-1].lon,coords[i].lat,coords[i].lon);
+    const steps=[];let lastName='',lastBearing=null,progressIndex=1;
+    for(const edge of allEdges){
+      const name=edge.seg?.name||'';if(!name||name===lastName){lastName=name||lastName;continue;}
+      const a=edge.dir>0?{x:edge.seg.ax,z:edge.seg.az}:{x:edge.seg.bx,z:edge.seg.bz},b=edge.dir>0?{x:edge.seg.bx,z:edge.seg.bz}:{x:edge.seg.ax,z:edge.seg.az};
+      const bearing=(Math.atan2(b.x-a.x,b.z-a.z)*180/Math.PI+360)%360;let modifier='straight';
+      if(lastBearing!=null){const delta=((bearing-lastBearing+540)%360)-180;if(delta>22)modifier=delta>60?'right':'slight right';else if(delta<-22)modifier=delta<-60?'left':'slight left';}
+      const loc=unproject(a.x,a.z);steps.push({distance:0,duration:0,name,type:lastBearing==null?'depart':'turn',maneuver:{type:lastBearing==null?'depart':'turn',modifier,location:[loc.lon,loc.lat],bearing_after:bearing}});
+      lastBearing=bearing;lastName=name;progressIndex++;
+    }
+    return {geometry:{coordinates:coords.map(c=>[c.lon,c.lat])},distance,duration:Math.max(45,distance/8.3),legs:[{steps}]};
+  }
+
   async function navigateTo(place, options={}) {
     if(challenge.active&&!options.challengeRoute)cancelChallenge({quiet:true,keepNavigation:true});
     if(guidedDrive?.active&&!options.guidedDrive)cancelGuidedDrive({quiet:true});
     if(!place || !insideSingapore(Number(place.lat),Number(place.lon))) {
-      showToast('Choose a destination inside Singapore');
+      showToast('Choose a destination inside Toa Payoh');
       return;
     }
     const start=currentCarCoords();
@@ -1144,42 +1189,25 @@
     els.navBanner.classList.toggle('rerouting',reroute);
     els.navArrow.textContent=reroute?'↻':'⌁';
     els.navArrow.style.transform='none';
-    els.navInstruction.textContent=reroute?'Re-routing…':`Finding the best drive to ${destination.name}…`;
+    els.navInstruction.textContent=reroute?'Re-routing…':`Finding a local route to ${destination.name}…`;
     els.navTurnDistance.textContent='';
     els.navDestinationName.textContent=destination.name;
     els.navRemaining.textContent='—';
     els.navEta.textContent='';
 
-    const controller=new AbortController();
-    const timeoutId=setTimeout(()=>controller.abort(),12000);
     try{
-      let res=null;
-      const validVia=(Array.isArray(via)?via:[]).filter(p=>p&&insideSingapore(Number(p.lat),Number(p.lon))).map(p=>({lat:Number(p.lat),lon:Number(p.lon)}));
-      // Guided drives use a few deliberate waypoints so the journey passes the places
-      // a visitor should actually experience. The public OSRM endpoint accepts multi-point
-      // routes directly; normal two-point navigation still prefers our cached backend.
-      if(!validVia.length&&BACKEND_ACTIVE){
-        try{
-          const path=`/api/route?startLat=${encodeURIComponent(start.lat)}&startLon=${encodeURIComponent(start.lon)}&endLat=${encodeURIComponent(destination.lat)}&endLon=${encodeURIComponent(destination.lon)}`;
-          res=await backendFetch(path,{headers:{Accept:'application/json'},signal:controller.signal});
-        }catch(err){console.warn('DriveSG route backend bypass',err?.message||err);}
-      }
-      if(!res||!res.ok){
-        const coords=[start,...validVia,destination].map(p=>`${p.lon},${p.lat}`).join(';');
-        const fallback=`${ROUTE_ENDPOINT}/${coords}?steps=true&geometries=geojson&overview=full&alternatives=false`;
-        res=await fetch(fallback,{headers:{Accept:'application/json'},signal:controller.signal});
-      }
-      if(!res.ok)throw new Error(`Routing ${res.status}`);
-      const data=await res.json();
-      if(data?.code!=='Ok'||!data.routes?.length)throw new Error(data?.code||'No route');
-      applyRoute(data.routes[0],destination);
-      if(!quiet)showToast(`Route ready · ${formatDistance(navigation.totalM)} · ${formatEta(navigation.durationS)}`);
+      const validVia=(Array.isArray(via)?via:[])
+        .filter(p=>p&&insideSingapore(Number(p.lat),Number(p.lon)))
+        .map(p=>({lat:Number(p.lat),lon:Number(p.lon)}));
+      const localRoute=buildLocalTownRoute(start,destination,validVia);
+      if(!localRoute)throw new Error('No connected local road path');
+      applyRoute(localRoute,destination);
+      if(!quiet)showToast(`Route ready · ${formatDistance(navigation.totalM)}`);
     }catch(err){
-      console.warn('Drive route unavailable; using compass guidance.',err);
+      console.warn('Local Toa Payoh route unavailable; using compass guidance.',err);
       activateCompassGuidance(destination);
-      if(!quiet)showToast('Route service unavailable — compass guidance active');
+      if(!quiet)showToast('Local route unavailable · follow the marker');
     }finally{
-      clearTimeout(timeoutId);
       navigation.fetching=false;
       els.navBanner.classList.remove('rerouting');
     }
@@ -1263,7 +1291,7 @@
     document.body.classList.remove('navigating');
     if(els.navProgressBar)els.navProgressBar.style.width='0%';
     els.routingCredit.textContent='';
-    els.placeEyebrow.textContent='DRIVING AROUND';
+    els.placeEyebrow.textContent='';
     els.locationName.textContent=currentLocationName;
     if(!quiet)showToast('Navigation ended');
   }
@@ -1523,17 +1551,16 @@
     els.placePicker?.classList.toggle('hidden',challengeView);
     els.challengeSection?.classList.toggle('hidden',!challengeView);
     if(challengeView){
-      els.panelTitle.textContent='Pick a driving challenge';
-      els.panelIntro.textContent='Timed Singapore drives. Clean driving improves your score.';
+      els.panelTitle.textContent='Toa Payoh drives';
+      els.panelIntro.textContent='';
       buildChallengeButtons();
       return;
     }
-    els.panelTitle.textContent=nav?'Where in Singapore?':'Choose where to start';
+    els.panelTitle.textContent=nav?'Toa Payoh':'Start in Toa Payoh';
     els.panelIntro.textContent=nav
-      ?`Driving around ${currentLocationName}. Choose a destination or scenic drive.`
-      :'Pick an area and start on a nearby road.';
-    els.searchInput.placeholder=nav?'Search destination, e.g. Bugis':'Search starting area, e.g. Bishan';
-    els.randomBtnLabel.textContent=nav?'Random destination':'Random start';
+      ?'':'';
+    els.searchInput.placeholder=nav?'Search Toa Payoh road or place':'Search Toa Payoh road or place';
+    els.randomBtnLabel.textContent='Surprise me';
   }
 
   function handlePlaceChoice(place) {
@@ -1813,8 +1840,8 @@
     els.placePicker?.classList.add('hidden');
     els.challengeSection?.classList.add('hidden');
     els.discoverSection?.classList.remove('hidden');
-    if(els.panelTitle)els.panelTitle.textContent='Discover Singapore';
-    if(els.panelIntro)els.panelIntro.textContent='Scenic routes through Singapore’s most distinctive areas.';
+    if(els.panelTitle)els.panelTitle.textContent='Explore Toa Payoh';
+    if(els.panelIntro)els.panelIntro.textContent='';
     buildGuidedDriveButtons();
     updatePassportProgress();
   }
@@ -1837,8 +1864,8 @@
     if(!guidedDrive?.active||guidedDrive.def?.id!==def.id)return;
     await navigateTo({...def.finish,subtitle:def.kicker},{quiet:true,guidedDrive:true,via:def.via||[]});
     if(guidedDrive?.active){
-      showDiscoveryCard('GUIDED DRIVE',def.name,def.summary,`${def.duration} · Drive normally — this is not a race.`,9000);
-      showToast(`Discover drive · ${def.start.name} → ${def.finish.name}`);
+      showDiscoveryCard('ROUTE',def.name,def.summary,'',5600);
+      showToast(`${def.start.name} → ${def.finish.name}`);
     }
   }
 
@@ -1855,7 +1882,7 @@
     els.journeyPostcardTime.textContent=`${mins} min`;
     els.journeyPostcardLandmarks.textContent=String(snapshot.highlightSeen?.size||0);
     els.journeyPostcardPassport.textContent=`${passport.count} / ${passport.total}`;
-    els.journeyPostcardNote.textContent=(snapshot.highlightSeen?.size||0)>2?'A proper slice of Singapore — skyline, streets and neighbourhood character.':'Another part of Singapore is now in your passport.';
+    els.journeyPostcardNote.textContent='Toa Payoh drive complete.';
     els.journeyPostcard.classList.add('show');document.body.classList.add('postcard-open');
   }
 
@@ -1865,7 +1892,7 @@
     const snapshot={...guidedDrive,highlightSeen:new Set(guidedDrive.highlightSeen||[])};
     const completed=readGuidedDriveCompleted();completed.add(guidedDrive.def.id);writeGuidedDriveCompleted(completed);
     buildGuidedDriveButtons();
-    showDiscoveryCard('DRIVE COMPLETE',guidedDrive.def.name,'You reached the end of this Singapore discovery drive.',`${guidedDrive.highlightSeen.size} featured landmark${guidedDrive.highlightSeen.size===1?'':'s'} noticed.`,4200);
+    showDiscoveryCard('DRIVE COMPLETE',guidedDrive.def.name,'Toa Payoh route complete.','',3200);
     guidedDrive.active=false;
     setTimeout(()=>showJourneyPostcard(snapshot),900);
     return true;
@@ -1880,7 +1907,7 @@
   function showAreaRibbon(zone){
     if(!zone||!els.areaRibbon)return;
     clearTimeout(areaRibbonTimer);
-    els.areaRibbonEyebrow.textContent='YOU’RE ENTERING';
+    els.areaRibbonEyebrow.textContent='TOA PAYOH';
     els.areaRibbonTitle.textContent=zone.name;
     els.areaRibbonText.textContent=zone.tagline;
     els.areaRibbon.classList.add('show');
@@ -1891,7 +1918,7 @@
     if(!els.discoveryCard)return;
     clearTimeout(discoveryCardTimer);
     els.discoveryKicker.textContent=kicker||'DISCOVERED';
-    els.discoveryTitle.textContent=title||'Singapore';
+    els.discoveryTitle.textContent=title||'Toa Payoh';
     els.discoveryText.textContent=text||'';
     els.discoveryDriveNote.textContent=note||'';
     els.discoveryCard.classList.add('show');
@@ -1918,7 +1945,7 @@
     for(const p of PRESETS){
       const d=haversineMeters(lat,lon,p.lat,p.lon);if(d<bestD){best=p;bestD=d;}
     }
-    return bestD<6500?`Near ${best.name}`:'Singapore';
+    return bestD<1800?`Near ${best.name}`:'Toa Payoh';
   }
 
   function guidedRemainingVia(){
@@ -1939,11 +1966,11 @@
     const zoneHit=nearestDiscoveryZone(c.lat,c.lon);
     if(zoneHit?.zone?.id!==currentDiscoveryZoneId){
       currentDiscoveryZoneId=zoneHit?.zone?.id||'';
-      applyDistrictVisualProfile(currentDiscoveryZoneId||'default');
+      applyDistrictVisualProfile(currentDiscoveryZoneId||'town-centre');
       if(zoneHit){
         const zone=zoneHit.zone,fresh=markDiscovered(`zone:${zone.id}`);
         showAreaRibbon(zone);
-        if(fresh&&!guidedDrive?.active)showDiscoveryCard('NEW AREA',zone.name,zone.text,zone.tip,7200);
+        if(fresh&&!guidedDrive?.active)showDiscoveryCard('AREA',zone.name,zone.text,'',4600);
       }
     }
 
@@ -1956,7 +1983,7 @@
       discoverySeenSession.add(key);
       const fresh=markDiscovered(key);
       if(guidedDrive?.active&&guidedDrive.def?.highlights?.includes(lm.kind))guidedDrive.highlightSeen.add(lm.kind);
-      showDiscoveryCard(fresh?'LANDMARK DISCOVERED':'YOU’RE PASSING',lm.name,info.text,info.note,8200);
+      showDiscoveryCard('LANDMARK',lm.name,info.text,'',5200);
       break;
     }
   }
@@ -2001,7 +2028,7 @@
     if(!els.hopMapOverlay?.classList.contains('show')||!els.hopMapCanvas)return;
     ensureHopMapResolution();
     const c=els.hopMapCanvas,ctx=c.getContext('2d'),w=c.width,h=c.height;
-    const center={lat:1.3521,lon:103.8198},zoom=hopMapZoom,gp=mercatorGlobalPixel(center.lat,center.lon,zoom);
+    const center={lat:1.3337,lon:103.8498},zoom=hopMapZoom,gp=mercatorGlobalPixel(center.lat,center.lon,zoom);
     ctx.clearRect(0,0,w,h);ctx.fillStyle='#102126';ctx.fillRect(0,0,w,h);
     const tx0=Math.floor((gp.x-w/2)/ONEMAP_TILE_SIZE)-1,tx1=Math.ceil((gp.x+w/2)/ONEMAP_TILE_SIZE)+1;
     const ty0=Math.floor((gp.y-h/2)/ONEMAP_TILE_SIZE)-1,ty1=Math.ceil((gp.y+h/2)/ONEMAP_TILE_SIZE)+1;
@@ -2031,19 +2058,19 @@
     const c=els.hopMapCanvas;if(!c)return;
     const rect=c.getBoundingClientRect(),ratioX=c.width/rect.width,ratioY=c.height/rect.height;
     const px=(e.clientX-rect.left)*ratioX,py=(e.clientY-rect.top)*ratioY;
-    const center={lat:1.3521,lon:103.8198},gp=mercatorGlobalPixel(center.lat,center.lon,hopMapZoom);
+    const center={lat:1.3337,lon:103.8498},gp=mercatorGlobalPixel(center.lat,center.lon,hopMapZoom);
     const q=inverseMercatorGlobalPixel(gp.x+(px-c.width/2),gp.y+(py-c.height/2),hopMapZoom);
-    if(!insideSingapore(q.lat,q.lon)){showToast('Choose a point on Singapore island');return;}
+    if(!insideSingapore(q.lat,q.lon)){showToast('Choose a point inside Toa Payoh');return;}
     selectedHopPoint={lat:q.lat,lon:q.lon,name:nearestNamedArea(q.lat,q.lon)};
     updateHopMapSelection();paintHopMap();
   }
 
   async function hopMapNavigate(){
-    if(!selectedHopPoint)return;const p={...selectedHopPoint,subtitle:'Selected on Singapore map'};closeHopMap();await navigateTo(p);
+    if(!selectedHopPoint)return;const p={...selectedHopPoint,subtitle:'Selected on Toa Payoh map'};closeHopMap();await navigateTo(p);
   }
 
   async function hopMapStart(){
-    if(!selectedHopPoint)return;const p={...selectedHopPoint,subtitle:'Selected on Singapore map'};closeHopMap();await loadLocation(p);
+    if(!selectedHopPoint)return;const p={...selectedHopPoint,subtitle:'Selected on Toa Payoh map'};closeHopMap();await loadLocation(p);
   }
 
   function ensureMiniMapResolution() {
@@ -2354,30 +2381,10 @@
     return cross>0?'right':'left';
   }
 
-  function createAmbientTraffic(group,segments,graph=roadGraph) {
-    ambientTraffic=[];trafficMesh=null;
-    const eligible=segments.filter(s=>Math.hypot(s.bx-s.ax,s.bz-s.az)>22&&!/service|living_street/.test(s.type||''));
-    if(!eligible.length||!group)return;
-    const count=Math.min(MAX_AMBIENT_TRAFFIC,Math.max(7,Math.floor(Math.max(11,eligible.length/18)*trafficDensityForTime())));
-    const geo=new THREE.BoxGeometry(1.68,.68,3.65);
-    trafficMesh=new THREE.InstancedMesh(geo,trafficMaterial,count);
-    trafficMesh.castShadow=false;trafficMesh.receiveShadow=false;
-    const palette=[0x263238,0xd6d9d6,0x7d292c,0x244a62,0xb7a56b,0xeeeeea,0x7b8790,0x1e6a4b];
-    for(let i=0;i<count;i++){
-      const seg=eligible[Math.floor(pseudoRandom(i*41+13)*eligible.length)];
-      const dirs=[1,-1].filter(d=>trafficCanTraverse(seg,d)),dir=dirs[Math.floor(pseudoRandom(i*17+4)*dirs.length)]||1;
-      const type=trafficVehicleType(i+1),laneCount=trafficDirectionalLaneCount(seg,dir);
-      const laneIndex=Math.min(laneCount-1,Math.floor(pseudoRandom(i*37+12)*Math.min(laneCount,2)));
-      ambientTraffic.push({
-        seg,t:dir>0?pseudoRandom(i*23+7):1-pseudoRandom(i*23+7),dir,type,
-        cruise:trafficCruiseFor(seg,i)*trafficVehicleSpec(type).speed,speed:0,x:0,z:0,y:seg.y||0,
-        laneIndex,laneFloat:laneIndex,targetLane:laneIndex,laneCooldown:pseudoRandom(i*19+2)*2,
-        nextLeg:null,nextTurn:'straight',dwellUntil:0,lastBusStopId:null,returnLaneTimer:0,visualYaw:null,turnBlend:null
-      });
-      const color=type==='bus'?0xe7e4db:type==='taxi'?(i%2?0x2e68a6:0xd44b47):type==='lorry'?0xb8b6a8:type==='van'?0xe1e2df:palette[i%palette.length];
-      trafficMesh.setColorAt(i,new THREE.Color(color));
-    }
-    trafficMesh.instanceColor.needsUpdate=true;group.add(trafficMesh);updateAmbientTraffic(0,0);
+  function createAmbientTraffic(_group,_segments,_graph=roadGraph) {
+    ambientTraffic=[];
+    trafficMesh=null;
+    // Focused Toa Payoh prototype intentionally has no ambient/public traffic.
   }
 
   function trafficCruiseFor(seg,seed=1){
@@ -2690,7 +2697,7 @@
   function cycleLightingMode(){
     const modes=['auto','day','dusk','night'],i=modes.indexOf(lightingMode);lightingMode=modes[(i+1)%modes.length];
     try{localStorage.setItem('drivesg-lighting-mode',lightingMode);}catch(_){}
-    updateLightingButton();lastLightingUpdate=-Infinity;showToast(`Lighting · ${lightingMode==='auto'?'Singapore time':lightingMode}`);
+    updateLightingButton();lastLightingUpdate=-Infinity;showToast(`Lighting · ${lightingMode==='auto'?'Auto':lightingMode}`);
   }
 
   function updateWorldLighting(dt,elapsed){
@@ -2973,7 +2980,7 @@
     try{localStorage.setItem('drivesg-camera-mode',cameraMode);}catch(_){}
     updateCameraButton();
     cameraShake=Math.max(cameraShake,.08);
-    const label=cameraMode==='hood'?'Hood camera · closer road view':(cameraMode==='scenic'?'Scenic camera · see more of Singapore':'Chase camera');
+    const label=cameraMode==='hood'?'Hood camera · closer road view':(cameraMode==='scenic'?'Scenic camera':'Chase camera');
     showToast(label);
   }
 
@@ -2994,6 +3001,25 @@
     els.gripIndicator.className=`dyn grip ${state}`.trim();
     els.absIndicator?.classList.toggle('active',absActive);
     els.tcsIndicator?.classList.toggle('active',tcsActive);
+  }
+
+  function buildCustomLandmarkColliders(centerX,centerZ,terrainPatch=activeTerrainPatch){
+    const out=[];
+    for(const lm of LANDMARKS){
+      const spec=LANDMARK_COLLIDER_SPECS[lm.kind];if(!spec)continue;
+      const p=project(lm.lat,lm.lon);if(Math.hypot(p.x-centerX,p.z-centerZ)>1800)continue;
+      const gy=terrainHeightAt(p.x,p.z,terrainPatch),w=spec.w,d=spec.d;
+      const pts=[
+        {x:p.x-w/2,z:p.z-d/2},{x:p.x+w/2,z:p.z-d/2},
+        {x:p.x+w/2,z:p.z+d/2},{x:p.x-w/2,z:p.z+d/2}
+      ];
+      out.push({
+        id:`lm-${lm.kind}`,pts,x:p.x,z:p.z,w,d,h:gy+spec.h,minHeight:gy,groundY:gy,wallTop:gy+spec.h,
+        bounds:{minX:p.x-w/2,maxX:p.x+w/2,minZ:p.z-d/2,maxZ:p.z+d/2},
+        distance:Math.hypot(p.x-centerX,p.z-centerZ),bucket:0,visualClass:'landmark',kind:lm.kind
+      });
+    }
+    return out;
   }
 
   function buildWorld(data, center = {}, terrainPatch = activeTerrainPatch) {
@@ -3035,6 +3061,7 @@
     for (const el of data.elements) {
       const tags = el.tags || {};
       if (el.type==='node' && Number.isFinite(el.lat) && Number.isFinite(el.lon)) {
+        if(!insideSingapore(el.lat,el.lon))continue;
         const p=project(el.lat,el.lon),dist=Math.hypot(p.x-centerX,p.z-centerZ);
         if(tags.highway==='traffic_signals'&&dist<=SIGNAL_RADIUS_METERS+80&&signalPoints.length<MAX_TRAFFIC_SIGNALS){signalPoints.push({...p,id:el.id});continue;}
         if(tags.highway==='crossing'&&dist<=SIGNAL_RADIUS_METERS+80&&crossingPoints.length<MAX_CROSSINGS){crossingPoints.push(p);continue;}
@@ -3051,6 +3078,7 @@
         const oneway=tags.oneway||(tags.junction==='roundabout'?'yes':'');
         const isBridge=roadIsBridge(tags);
         const isTunnel=roadIsTunnel(tags);
+        if(isTunnel || /motorway|trunk/.test(type)) continue; // focused town build: no tunnels or expressways
         const points = cleanPolyline(el.geometry.map(q => {
           const p=project(q.lat,q.lon);
           return {...p,y:terrainHeightAt(p.x,p.z,terrainPatch)+roadY};
@@ -3077,6 +3105,8 @@
           const dx = b.x - a.x, dz = b.z - a.z;
           const length = Math.hypot(dx, dz);
           if (length < .6 || length > 1500) continue;
+          const midGeo=unproject((a.x+b.x)/2,(a.z+b.z)/2);
+          if(!insideSingapore(midGeo.lat,midGeo.lon))continue;
           const fromKey=nodeIds[i]!=null?`n${nodeIds[i]}`:graphPointKey(a.x,a.z);
           const toKey=nodeIds[i+1]!=null?`n${nodeIds[i+1]}`:graphPointKey(b.x,b.z);
           const seg = {
@@ -3144,12 +3174,14 @@
     const filteredBuildings=filterBuildingShellsWithParts(buildingDescriptors);
     filteredBuildings.sort((a,b) => a.distance - b.distance);
     const selectedBuildings = filteredBuildings.slice(0, MAX_BUILDINGS);
+    const landmarkColliders=buildCustomLandmarkColliders(centerX,centerZ,terrainPatch);
+    const collisionBuildings=selectedBuildings.concat(landmarkColliders);
     const windowBudget={count:0},detailBudget={count:0},roofBudget={count:0};
     selectedBuildings.forEach((b,index) => {
       appendBuildingGeometry(buildingVerts[b.bucket], b);
       if(index<MAX_FACADE_BUILDINGS&&windowBudget.count<MAX_BUILDING_WINDOWS)appendBuildingFacade(windowVerts,storefrontVerts,b,windowBudget);
       if(index<MAX_FACADE_BUILDINGS&&detailBudget.count<MAX_FACADE_DETAILS)appendBuildingIdentityDetails(hdbDetailVerts,officeBandVerts,awningVerts,b,detailBudget);
-      if(index<220&&roofBudget.count<520)appendRooftopDetails(rooftopVerts,b,roofBudget);
+      if(index<520&&roofBudget.count<1100)appendRooftopDetails(rooftopVerts,b,roofBudget);
     });
     buildingVerts.forEach((verts, bucket) => {
       if (!verts.length) return;
@@ -3163,6 +3195,7 @@
     if(officeBandVerts.length){const mesh=meshFromFlatVertices(officeBandVerts,shared.officeBand,false);mesh.renderOrder=3;mesh.userData.qualityLayer='micro';group.add(mesh);}
     if(awningVerts.length){const mesh=meshFromFlatVertices(awningVerts,shared.awning,false);mesh.renderOrder=4;mesh.userData.qualityLayer='detail';group.add(mesh);}
     if(rooftopVerts.length){const mesh=meshFromFlatVertices(rooftopVerts,shared.rooftop,true);mesh.userData.qualityLayer='detail';group.add(mesh);}
+    const blockNumberSignCount=addHdbBlockNumberSigns(group,selectedBuildings);
 
     const signalDescriptors=mapSignalsToSegments(signalPoints,segments);
     const busStopDescriptors=mapBusStopsToSegments(busStopPoints,segments);
@@ -3177,15 +3210,15 @@
     const roadStudCount=addExpresswayRoadStuds(group,segments);
     const gantryCount=addRoadGantries(group,segments,centerX,centerZ);
     const roadSignCount=addRoadNameSigns(group,segments,centerX,centerZ);
-    const treeCount = addRoadsideTrees(group, segments, centerX, centerZ, selectedBuildings, terrainPatch);
-    const tropicalPlantCount=addTropicalVegetation(group,segments,parkPolygons,waterPolygons,centerX,centerZ,selectedBuildings,terrainPatch);
+    const treeCount = addRoadsideTrees(group, segments, centerX, centerZ, collisionBuildings, terrainPatch);
+    const tropicalPlantCount=addTropicalVegetation(group,segments,parkPolygons,waterPolygons,centerX,centerZ,collisionBuildings,terrainPatch);
     addLandmarksTo(group,centerX,centerZ,terrainPatch);
     return {
       group, segments, roadGraph:roadGraphBuilt, signalDescriptors, busStopDescriptors, signalVisuals:signalBuild.visuals, roadCount,
       buildingCount: selectedBuildings.length,
-      buildingColliders: selectedBuildings,
+      buildingColliders: collisionBuildings,
       waterPolygons, parkPolygons,
-      treeCount, tropicalPlantCount, streetLightCount, tunnelLightCount, roadStudCount, gantryCount, roadSignCount, junctionMarkingCount, waterCount, parkCount, trafficSignalCount, crossingCount, busStopCount,
+      treeCount, tropicalPlantCount, streetLightCount, tunnelLightCount, roadStudCount, gantryCount, roadSignCount, blockNumberSignCount, junctionMarkingCount, waterCount, parkCount, trafficSignalCount, crossingCount, busStopCount,
       terrainPatch
     };
   }
@@ -3315,6 +3348,33 @@
     });
   }
 
+  function addHdbBlockNumberSigns(group,buildings){
+    const candidates=(buildings||[]).filter(b=>b.visualClass==='hdb'&&b.blockNumber&&b.distance<720&&b.pts?.length>=3).slice(0,28);
+    let count=0;
+    for(const b of candidates){
+      let best=null,bestLen=0;
+      const areaSign=polygonArea(b.pts)>=0?1:-1;
+      for(let i=0;i<b.pts.length;i++){
+        const a=b.pts[i],c=b.pts[(i+1)%b.pts.length],dx=c.x-a.x,dz=c.z-a.z,len=Math.hypot(dx,dz);
+        if(len>bestLen){bestLen=len;best={a,c,dx,dz,len};}
+      }
+      if(!best||best.len<7)continue;
+      const {a,c,dx,dz,len}=best,nx=(areaSign>0?dz:-dz)/len,nz=(areaSign>0?-dx:dx)/len;
+      const canvas=document.createElement('canvas');canvas.width=256;canvas.height=128;
+      const ctx=canvas.getContext('2d');if(!ctx)continue;
+      ctx.fillStyle='#f4efe5';ctx.fillRect(0,0,256,128);
+      ctx.fillStyle='#9d4f3d';ctx.textAlign='center';ctx.textBaseline='middle';ctx.font='900 76px -apple-system,BlinkMacSystemFont,Arial,sans-serif';
+      ctx.fillText(b.blockNumber,128,67,220);
+      const tex=new THREE.CanvasTexture(canvas);tex.colorSpace=THREE.SRGBColorSpace;tex.minFilter=THREE.LinearFilter;tex.magFilter=THREE.LinearFilter;
+      const mat=new THREE.MeshBasicMaterial({map:tex,toneMapped:false,side:THREE.DoubleSide});
+      const sign=new THREE.Mesh(new THREE.PlaneGeometry(3.9,1.95),mat);
+      sign.position.set((a.x+c.x)/2+nx*.075,(b.groundY||0)+Math.min(10.2,Math.max(5.8,(b.wallTop-(b.groundY||0))*.28)),(a.z+c.z)/2+nz*.075);
+      sign.rotation.y=Math.atan2(nx,nz);sign.renderOrder=5;sign.userData.ephemeralTexture=tex;sign.userData.qualityLayer='detail';
+      group.add(sign);count++;
+    }
+    return count;
+  }
+
   function mapBusStopsToSegments(points,segments){
     for(const seg of segments)seg.busStops=[];
     const out=[];
@@ -3374,7 +3434,7 @@
 
 
   function appendBuildingIdentityDetails(hdbOut,officeOut,awningOut,b,budget){
-    if(!b?.pts?.length||b.distance>430||budget.count>=MAX_FACADE_DETAILS)return;
+    if(!b?.pts?.length||b.distance>1050||budget.count>=MAX_FACADE_DETAILS)return;
     const cls=b.visualClass||'generic',height=b.wallTop-b.minHeight,groundY=b.groundY||0,relMin=b.minHeight-(b.groundY||0);
     if(height<6)return;
     const areaSign=polygonArea(b.pts)>=0?1:-1;
@@ -3479,7 +3539,7 @@
       const s=it.seg,dx=s.bx-s.ax,dz=s.bz-s.az,len=Math.hypot(dx,dz)||1,nx=-dz/len,nz=dx/len,ux=dx/len,uz=dz/len,x=s.ax+dx*it.t,z=s.az+dz*it.t,y=s.y||0,yaw=Math.atan2(dx,dz);
       quat.setFromAxisAngle(new THREE.Vector3(0,1,0),yaw);pos.set(x,y+5.35,z);m.compose(pos,quat,scale);signs.setMatrixAt(i,m);
       for(const side of [-1,1]){pos.set(x+nx*(s.width/2+.75)*side,y+2.9,z+nz*(s.width/2+.75)*side);m.compose(pos,quat,scale);poles.setMatrixAt(pi++,m);}
-      const label=String(s.destination||s.name||s.ref||'Singapore').trim();
+      const label=String(s.destination||s.name||s.ref||'Toa Payoh').trim();
       const tex=makeRoadSignTexture(label,s.ref||'');
       if(tex){
         const mat=new THREE.MeshBasicMaterial({map:tex,side:THREE.DoubleSide,toneMapped:false});
@@ -3496,7 +3556,7 @@
     const ctx=canvas.getContext('2d');if(!ctx)return null;
     ctx.fillStyle='#17633f';ctx.fillRect(0,0,512,144);
     ctx.strokeStyle='rgba(255,255,255,.92)';ctx.lineWidth=5;ctx.strokeRect(8,8,496,128);
-    const clean=String(label||'Singapore').replace(/\s+/g,' ').trim();
+    const clean=String(label||'Toa Payoh').replace(/\s+/g,' ').trim();
     ctx.fillStyle='#fff';ctx.textAlign='center';ctx.textBaseline='middle';
     let size=clean.length>25?34:clean.length>17?40:47;
     ctx.font=`800 ${size}px -apple-system, BlinkMacSystemFont, Arial, sans-serif`;
@@ -3515,9 +3575,9 @@
       return ad-bd;
     });
     for(const seg of sorted){
-      const label=String(seg.name||'').trim();if(!label||label==='Singapore road'||used.has(label))continue;
+      const label=String(seg.name||'').trim();if(!label||label==='Toa Payoh road'||used.has(label))continue;
       const dx=seg.bx-seg.ax,dz=seg.bz-seg.az,len=Math.hypot(dx,dz);if(len<32)continue;
-      const mx=(seg.ax+seg.bx)/2,mz=(seg.az+seg.bz)/2,dist=Math.hypot(mx-centerX,mz-centerZ);if(dist>700)continue;
+      const mx=(seg.ax+seg.bx)/2,mz=(seg.az+seg.bz)/2,dist=Math.hypot(mx-centerX,mz-centerZ);if(dist>1350)continue;
       if(!/motorway|trunk|primary|secondary|tertiary/.test(seg.type||'')&&pseudoRandom(seg.ax*.11+seg.az*.17)<.62)continue;
       used.add(label);items.push({seg,label,sub:seg.ref||seg.destination||''});if(items.length>=MAX_ROAD_NAME_SIGNS)break;
     }
@@ -3556,7 +3616,7 @@
   function addTropicalVegetation(group,segments,parks,waters,centerX,centerZ,buildings=[],terrainPatch=activeTerrainPatch){
     const palms=[],shrubs=[];
     const centerGeo=unproject(centerX,centerZ),zone=nearestDiscoveryZone(centerGeo.lat,centerGeo.lon),zoneId=zone?.id||'';
-    const lushCoastal=/changi|east-coast|sentosa|harbourfront/.test(zoneId),lushUrban=/orchard|toa-payoh|jurong-east|woodlands/.test(zoneId);
+    const lushCoastal=false,lushUrban=true; // mature Toa Payoh streets stay consistently green across the focused town
     for(let si=0;si<segments.length&&(palms.length+shrubs.length)<MAX_TROPICAL_PLANTS;si++){
       const seg=segments[si],dx=seg.bx-seg.ax,dz=seg.bz-seg.az,len=Math.hypot(dx,dz);if(len<40)continue;
       const ux=dx/len,uz=dz/len,nx=-uz,nz=ux,seed=Math.abs(Math.round(seg.ax*11+seg.az*7+si*19));
@@ -3564,7 +3624,7 @@
       for(let d=spacing*.5;d<len&&(palms.length+shrubs.length)<MAX_TROPICAL_PLANTS;d+=spacing){
         const side=pseudoRandom(seed+d*3)>.5?1:-1,off=seg.width/2+5.8+pseudoRandom(seed+d*7)*3.4;
         const x=seg.ax+ux*d+nx*off*side,z=seg.az+uz*d+nz*off*side;
-        if(Math.hypot(x-centerX,z-centerZ)>760||pointHitsBuildingBounds(x,z,buildings,2.8))continue;
+        if(Math.hypot(x-centerX,z-centerZ)>1420||pointHitsBuildingBounds(x,z,buildings,2.8))continue;
         const waterfront=nearSurfaceFeature(x,z,waters,16),park=nearSurfaceFeature(x,z,parks,12);
         const boulevard=/primary|secondary/.test(seg.type||'')&&pseudoRandom(seed+d*13)>(lushCoastal?.30:(lushUrban?.48:.62));
         const districtLandscape=(lushCoastal||lushUrban)&&/primary|secondary|tertiary/.test(seg.type||'')&&pseudoRandom(seed+d*29)>.48;
@@ -3992,7 +4052,7 @@
 
   function addRoadsideTrees(group, segments, centerX, centerZ, buildings=[], terrainPatch=activeTerrainPatch) {
     const trees=[];
-    const maxTrees=190;
+    const maxTrees=260;
     for(let si=0;si<segments.length && trees.length<maxTrees;si++){
       const seg=segments[si];
       const dx=seg.bx-seg.ax,dz=seg.bz-seg.az,len=Math.hypot(dx,dz);
@@ -4090,6 +4150,8 @@
     const w=maxX-minX,d=maxZ-minZ;
     if(area<8||area>45000||w>260||d>260)return null;
     const x=(minX+maxX)/2,z=(minZ+maxZ)/2;
+    const geo=unproject(x,z);if(!insideSingapore(geo.lat,geo.lon))return null;
+    if(insideCustomLandmarkFootprint(x,z))return null;
     const distance=Math.hypot(x-center.x,z-center.z);
     if(distance>BUILDING_RADIUS_METERS+130)return null;
 
@@ -4125,10 +4187,19 @@
     return {
       id:Number(el.id)||1,pts,x,z,w,d,h,wallTop:wallTopWorld,roofHeight,roofShape,minHeight,groundY,distance,area,isPart,kind,
       name:tags.name||'',
+      blockNumber:buildingBlockNumber(tags),
       bounds:{minX,maxX,minZ,maxZ},
       bucket:buildingMaterialBucket(tags,el.id),
       visualClass:buildingVisualClass(tags,el.id)
     };
+  }
+
+  function buildingBlockNumber(tags={}) {
+    const direct=String(tags['addr:housenumber']||'').trim().toUpperCase();
+    if(/^[0-9]{1,3}[A-Z]?$/.test(direct))return direct;
+    const name=String(tags.name||'');
+    const hit=name.match(/(?:BLK|BLOCK)\s*([0-9]{1,3}[A-Z]?)/i);
+    return hit?hit[1].toUpperCase():'';
   }
 
   function fallbackBuildingHeight(tags,id) {
@@ -4200,7 +4271,7 @@
     if (tags.name) return tags.name;
     if (tags.ref) return tags.ref;
     const type = String(tags.highway || '').replace(/_/g, ' ');
-    if (!type) return 'Singapore road';
+    if (!type) return 'Toa Payoh road';
     return type.replace(/\b\w/g, c => c.toUpperCase());
   }
   function pseudoRandom(seed) { const x=Math.sin(Number(seed||1)*12.9898)*43758.5453; return x-Math.floor(x); }
@@ -4212,110 +4283,16 @@
       const holder=new THREE.Group();
       holder.position.y=terrainHeightAt(p.x,p.z,terrainPatch);
       group.add(holder);
-      if (lm.kind==='mbs') addMbs(holder,p.x,p.z);
-      else if (lm.kind==='flyer') addFlyer(holder,p.x,p.z);
-      else if (lm.kind==='dome') addDome(holder,p.x,p.z);
-      else if (lm.kind==='artscience') addArtScience(holder,p.x,p.z);
-      else if (lm.kind==='merlion') addMerlion(holder,p.x,p.z);
-      else if (lm.kind==='supertrees') addSupertrees(holder,p.x,p.z);
-      else if (lm.kind==='mbfc') addMbfc(holder,p.x,p.z);
-      else if (lm.kind==='fullerton') addFullerton(holder,p.x,p.z);
-      else if (lm.kind==='ion') addIon(holder,p.x,p.z);
-      else if (lm.kind==='ngeeann') addNgeeAnn(holder,p.x,p.z);
-      else if (lm.kind==='orchardgateway') addOrchardGateway(holder,p.x,p.z);
-      else if (lm.kind==='jewel') addJewel(holder,p.x,p.z);
-      else if (lm.kind==='pinnacle') addPinnacle(holder,p.x,p.z);
-      else if (lm.kind==='sportshub') addSportsHub(holder,p.x,p.z);
-      else if (lm.kind==='hdbhub') addHdbHub(holder,p.x,p.z);
-      else if (lm.kind==='gallery') addNationalGallery(holder,p.x,p.z);
-      else if (lm.kind==='raffleshotel') addRafflesHotel(holder,p.x,p.z);
-      else if (lm.kind==='vivocity') addVivoCity(holder,p.x,p.z);
-      else if (lm.kind==='helix') addHelixBridge(holder,p.x,p.z);
-      else if (lm.kind==='ocbc') addOcbcCentre(holder,p.x,p.z);
-      if(!holder.children.length){group.remove(holder);}
+      if (lm.kind==='hdbhub') addHdbHub(holder,p.x,p.z);
+      else if (lm.kind==='dragon') addDragonPlayground(holder,p.x,p.z);
+      else if (lm.kind==='townpark') addToaPayohTownPark(holder,p.x,p.z);
+      else if (lm.kind==='vip53') addVipBlock53(holder,p.x,p.z);
+      else if (lm.kind==='block157') addBlock157(holder,p.x,p.z);
+      else if (lm.kind==='centralhorizon') addCentralHorizon(holder,p.x,p.z);
+      else if (lm.kind==='toapayohmall') addToaPayohMall(holder,p.x,p.z);
+      else if (lm.kind==='shuanglin') addShuangLinMonastery(holder,p.x,p.z);
+      if(!holder.children.length)group.remove(holder);
     }
-  }
-
-  function addMbs(group,x,z) {
-    const mat=new THREE.MeshStandardMaterial({color:0xbec6ca,roughness:.66});
-    [-34,0,34].forEach(dx=>{ const t=new THREE.Mesh(new THREE.BoxGeometry(24,112,28),mat); t.position.set(x+dx,56,z); group.add(t); });
-    const deck=new THREE.Mesh(new THREE.BoxGeometry(105,5,20),new THREE.MeshStandardMaterial({color:0x6d7778,roughness:.5}));
-    deck.position.set(x,115,z); group.add(deck);
-  }
-  function addFlyer(group,x,z) {
-    const ring=new THREE.Mesh(new THREE.TorusGeometry(42,1.6,8,48),new THREE.MeshStandardMaterial({color:0xd8dcdd,roughness:.55}));
-    ring.position.set(x,48,z); ring.rotation.y=Math.PI/2; group.add(ring);
-    const stand=new THREE.Mesh(new THREE.BoxGeometry(3,52,3),new THREE.MeshStandardMaterial({color:0x7f898d})); stand.position.set(x,25,z); group.add(stand);
-  }
-  function addDome(group,x,z) {
-    const dome=new THREE.Mesh(new THREE.SphereGeometry(22,18,9,0,Math.PI*2,0,Math.PI/2),new THREE.MeshStandardMaterial({color:0xb5b2a1,roughness:.9}));
-    dome.scale.z=.72; dome.position.set(x,0,z); group.add(dome);
-  }
-
-  function addArtScience(group,x,z){
-    const white=new THREE.MeshStandardMaterial({color:0xe2ddd2,roughness:.72}),base=new THREE.Mesh(new THREE.CylinderGeometry(11,14,5,14),white);base.position.set(x,2.5,z);group.add(base);
-    for(let i=0;i<9;i++){
-      const a=i*Math.PI*2/9,petal=new THREE.Mesh(new THREE.ConeGeometry(5.2,18,6),white);petal.position.set(x+Math.cos(a)*7.2,12,z+Math.sin(a)*7.2);petal.rotation.z=Math.PI*.42;petal.rotation.y=-a;group.add(petal);
-    }
-  }
-  function addMerlion(group,x,z){
-    const stone=new THREE.MeshStandardMaterial({color:0xe7e2d8,roughness:.82}),water=new THREE.MeshBasicMaterial({color:0x87c5dc,transparent:true,opacity:.72});
-    const base=new THREE.Mesh(new THREE.CylinderGeometry(2.6,3.2,1.2,10),stone);base.position.set(x,.6,z);group.add(base);
-    const body=new THREE.Mesh(new THREE.CylinderGeometry(1.2,1.8,6.4,9),stone);body.position.set(x,4.3,z);group.add(body);
-    const head=new THREE.Mesh(new THREE.SphereGeometry(1.55,10,8),stone);head.position.set(x,8.1,z+.15);group.add(head);
-    const stream=new THREE.Mesh(new THREE.CylinderGeometry(.16,.16,7,6),water);stream.rotation.x=Math.PI/2;stream.position.set(x,7.7,z+4.4);group.add(stream);
-  }
-  function addSupertrees(group,x,z){
-    const trunkMat=new THREE.MeshStandardMaterial({color:0x775b48,roughness:.88}),crownMat=new THREE.MeshStandardMaterial({color:0x607b59,emissive:0x16321f,emissiveIntensity:.14,roughness:.9});
-    [[0,0,1.25],[-14,8,.9],[13,10,.95],[-10,-12,.82],[15,-9,.84]].forEach(([dx,dz,s])=>{
-      const trunk=new THREE.Mesh(new THREE.CylinderGeometry(1.5,3.2,28*s,10),trunkMat);trunk.position.set(x+dx,14*s,z+dz);group.add(trunk);
-      const crown=new THREE.Mesh(new THREE.CylinderGeometry(8.2*s,3.1*s,8*s,12,1,true),crownMat);crown.position.set(x+dx,29*s,z+dz);group.add(crown);
-    });
-  }
-  function addMbfc(group,x,z){
-    const glass=new THREE.MeshStandardMaterial({color:0x829aa5,roughness:.3,metalness:.12});
-    [[-18,0,92,18,24],[9,-5,116,20,26],[30,7,84,18,22]].forEach(([dx,dz,h,w,d])=>{const t=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),glass);t.position.set(x+dx,h/2,z+dz);group.add(t);});
-  }
-  function addFullerton(group,x,z){
-    const stone=new THREE.MeshStandardMaterial({color:0xd8ccb8,roughness:.82}),roof=new THREE.MeshStandardMaterial({color:0x777a76,roughness:.88});
-    const body=new THREE.Mesh(new THREE.BoxGeometry(48,22,26),stone);body.position.set(x,11,z);group.add(body);
-    const r=new THREE.Mesh(new THREE.ConeGeometry(18,9,4),roof);r.rotation.y=Math.PI/4;r.scale.x=1.55;r.position.set(x,26,z);group.add(r);
-  }
-  function addIon(group,x,z){
-    const glass=new THREE.MeshStandardMaterial({color:0x667f8e,roughness:.26,metalness:.16}),pod=new THREE.MeshStandardMaterial({color:0xaaa9a5,roughness:.62});
-    const podium=new THREE.Mesh(new THREE.CylinderGeometry(18,22,14,12),pod);pod.position.set(x,7,z);group.add(podium);
-    const tower=new THREE.Mesh(new THREE.CylinderGeometry(9,13,88,10),glass);tower.position.set(x+5,58,z-3);tower.rotation.z=-.035;group.add(tower);
-  }
-  function addNgeeAnn(group,x,z){
-    const stone=new THREE.MeshStandardMaterial({color:0xb88f78,roughness:.76}),dark=new THREE.MeshStandardMaterial({color:0x6e6a66,roughness:.7});
-    const pod=new THREE.Mesh(new THREE.BoxGeometry(70,18,42),stone);pod.position.set(x,9,z);group.add(pod);
-    [-22,22].forEach(dx=>{const tower=new THREE.Mesh(new THREE.BoxGeometry(20,60,24),stone);tower.position.set(x+dx,48,z);group.add(tower);const cap=new THREE.Mesh(new THREE.BoxGeometry(22,3,26),dark);cap.position.set(x+dx,79,z);group.add(cap);});
-  }
-  function addOrchardGateway(group,x,z){
-    const glass=new THREE.MeshStandardMaterial({color:0x78909c,roughness:.28,metalness:.12});
-    const a=new THREE.Mesh(new THREE.BoxGeometry(13,72,18),glass);a.position.set(x-11,36,z);group.add(a);
-    const b=new THREE.Mesh(new THREE.BoxGeometry(13,58,18),glass);b.position.set(x+12,29,z+3);group.add(b);
-    const bridge=new THREE.Mesh(new THREE.BoxGeometry(24,4,7),glass);bridge.position.set(x,35,z+1);group.add(bridge);
-  }
-  function addJewel(group,x,z){
-    const glass=new THREE.MeshStandardMaterial({color:0x8ca7ac,roughness:.28,metalness:.08,transparent:true,opacity:.86,side:THREE.DoubleSide});
-    const dome=new THREE.Mesh(new THREE.SphereGeometry(52,28,12,0,Math.PI*2,0,Math.PI/2),glass);dome.scale.y=.34;dome.position.set(x,0,z);group.add(dome);
-    const oculus=new THREE.Mesh(new THREE.TorusGeometry(5.2,.8,8,24),new THREE.MeshStandardMaterial({color:0x53686d,roughness:.5}));oculus.rotation.x=Math.PI/2;oculus.position.set(x,17.3,z);group.add(oculus);
-  }
-
-
-  function addPinnacle(group,x,z){
-    const mat=new THREE.MeshStandardMaterial({color:0xc9c7c0,roughness:.78}),sky=new THREE.MeshStandardMaterial({color:0x7b8789,roughness:.55});
-    const xs=[-32,-16,0,16,32];
-    xs.forEach((dx,i)=>{const h=92+(i%2)*7,t=new THREE.Mesh(new THREE.BoxGeometry(12,h,18),mat);t.position.set(x+dx,h/2,z+(i%2?2:-2));group.add(t);});
-    const deck1=new THREE.Mesh(new THREE.BoxGeometry(78,2.4,9),sky);deck1.position.set(x,51,z);group.add(deck1);
-    const deck2=new THREE.Mesh(new THREE.BoxGeometry(78,2.4,9),sky);deck2.position.set(x,83,z);group.add(deck2);
-  }
-
-  function addSportsHub(group,x,z){
-    const roof=new THREE.MeshStandardMaterial({color:0xd4d7d4,roughness:.56,metalness:.04}),dark=new THREE.MeshStandardMaterial({color:0x596266,roughness:.7});
-    const bowl=new THREE.Mesh(new THREE.CylinderGeometry(46,50,18,28),dark);bowl.position.set(x,9,z);group.add(bowl);
-    const dome=new THREE.Mesh(new THREE.SphereGeometry(50,30,12,0,Math.PI*2,0,Math.PI/2),roof);dome.scale.y=.36;dome.position.set(x,17,z);group.add(dome);
   }
 
   function addHdbHub(group,x,z){
@@ -4323,44 +4300,143 @@
     const podium=new THREE.Mesh(new THREE.BoxGeometry(52,14,34),hdb);podium.position.set(x,7,z);group.add(podium);
     const tower=new THREE.Mesh(new THREE.BoxGeometry(22,76,24),hdb);tower.position.set(x-9,52,z);group.add(tower);
     for(let y=20;y<86;y+=9){const band=new THREE.Mesh(new THREE.BoxGeometry(22.3,.45,24.3),glass);band.position.set(x-9,y,z);group.add(band);}
+    const hdbSign=makeLandmarkSign('HDB',{w:7.2,h:2.4,bg:'#f4f1e8',fg:'#4a7d9f',font:78});
+    if(hdbSign){hdbSign.position.set(x+6,15.2,z-17.1);group.add(hdbSign);}
+    const canopyMat=new THREE.MeshStandardMaterial({color:0xbec5c2,roughness:.48,metalness:.08});
+    const canopy=new THREE.Mesh(new THREE.CylinderGeometry(17,17,2.0,24,1,false,0,Math.PI),canopyMat);canopy.rotation.z=Math.PI/2;canopy.rotation.y=Math.PI/2;canopy.scale.y=.45;canopy.position.set(x+10,5.2,z+21);group.add(canopy);
   }
 
-  function addNationalGallery(group,x,z){
-    const stone=new THREE.MeshStandardMaterial({color:0xd8d0be,roughness:.85}),roof=new THREE.MeshStandardMaterial({color:0x7f827e,roughness:.82});
-    const left=new THREE.Mesh(new THREE.BoxGeometry(31,22,26),stone);left.position.set(x-17,11,z);group.add(left);
-    const right=new THREE.Mesh(new THREE.BoxGeometry(31,22,26),stone);right.position.set(x+17,11,z+1);group.add(right);
-    const bridge=new THREE.Mesh(new THREE.BoxGeometry(13,5,12),new THREE.MeshStandardMaterial({color:0x87979c,roughness:.42,metalness:.08}));bridge.position.set(x,15,z);group.add(bridge);
-    [-17,17].forEach(dx=>{const cap=new THREE.Mesh(new THREE.ConeGeometry(11,6,4),roof);cap.rotation.y=Math.PI/4;cap.scale.z=.72;cap.position.set(x+dx,25,z);group.add(cap);});
-  }
-
-  function addRafflesHotel(group,x,z){
-    const white=new THREE.MeshStandardMaterial({color:0xe8e2d6,roughness:.84}),roof=new THREE.MeshStandardMaterial({color:0x6e7970,roughness:.9});
-    const body=new THREE.Mesh(new THREE.BoxGeometry(52,16,29),white);body.position.set(x,8,z);group.add(body);
-    const wing1=new THREE.Mesh(new THREE.BoxGeometry(23,13,48),white);wing1.position.set(x-25,6.5,z+7);group.add(wing1);
-    const wing2=wing1.clone();wing2.position.x=x+25;group.add(wing2);
-    const cap=new THREE.Mesh(new THREE.BoxGeometry(54,2.2,31),roof);cap.position.set(x,17.1,z);group.add(cap);
-  }
-
-  function addVivoCity(group,x,z){
-    const white=new THREE.MeshStandardMaterial({color:0xd3d6d3,roughness:.66}),glass=new THREE.MeshStandardMaterial({color:0x6e8791,roughness:.28,metalness:.08});
-    const base=new THREE.Mesh(new THREE.BoxGeometry(82,18,46),white);base.position.set(x,9,z);group.add(base);
-    const curve=new THREE.Mesh(new THREE.CylinderGeometry(25,25,16,20,1,false,0,Math.PI),glass);curve.rotation.z=Math.PI/2;curve.rotation.y=Math.PI/2;curve.position.set(x+26,14,z);group.add(curve);
-    const roof=new THREE.Mesh(new THREE.BoxGeometry(72,3,38),white);roof.position.set(x-4,20,z);group.add(roof);
-  }
-
-  function addHelixBridge(group,x,z){
-    const metal=new THREE.MeshStandardMaterial({color:0xaeb8ba,roughness:.46,metalness:.24}),deckMat=new THREE.MeshStandardMaterial({color:0x737c7e,roughness:.74});
-    const deck=new THREE.Mesh(new THREE.BoxGeometry(7,1.1,74),deckMat);deck.position.set(x,3.2,z);deck.rotation.y=-.18;group.add(deck);
-    for(let i=0;i<15;i++){
-      const t=i/14,a=t*Math.PI*5.2,zz=-34+t*68;
-      const ring=new THREE.Mesh(new THREE.TorusGeometry(4.2,.18,5,18),metal);ring.position.set(x+Math.sin(a)*.45,7.2,z+zz);ring.rotation.x=Math.PI/2;ring.rotation.z=a*.08;group.add(ring);
+  function addDragonPlayground(group,x,z){
+    const red=new THREE.MeshStandardMaterial({color:0xb84a35,roughness:.72}),white=new THREE.MeshStandardMaterial({color:0xe3ded0,roughness:.8}),blue=new THREE.MeshStandardMaterial({color:0x2d78a7,roughness:.65}),green=new THREE.MeshStandardMaterial({color:0x4f9b78,roughness:.7}),sand=new THREE.MeshStandardMaterial({color:0xd8c49d,roughness:1});
+    const base=new THREE.Mesh(new THREE.CylinderGeometry(16,16,.18,28),sand);base.scale.z=.68;base.position.set(x,.09,z);group.add(base);
+    const head=new THREE.Mesh(new THREE.BoxGeometry(7.5,8.5,2.4),red);head.position.set(x-7,4.3,z);head.rotation.z=-.12;group.add(head);
+    const snout=new THREE.Mesh(new THREE.BoxGeometry(4.7,2.7,2.7),red);snout.position.set(x-10.2,3.0,z);group.add(snout);
+    const eye=new THREE.Mesh(new THREE.CylinderGeometry(.72,.72,.18,10),white);eye.rotation.x=Math.PI/2;eye.position.set(x-8.2,6.2,z-1.28);group.add(eye);
+    const pupil=new THREE.Mesh(new THREE.CylinderGeometry(.28,.28,.19,10),blue);pupil.rotation.x=Math.PI/2;pupil.position.set(x-8.2,6.2,z-1.39);group.add(pupil);
+    for(let i=0;i<11;i++){
+      const t=i/10,px=x-3+t*17,pz=z+Math.sin(t*Math.PI)*2.3,py=4.8+Math.sin(t*Math.PI)*1.1;
+      const ring=new THREE.Mesh(new THREE.TorusGeometry(2.05,.16,6,18),i%3===0?red:(i%3===1?blue:green));ring.rotation.y=Math.PI/2;ring.position.set(px,py,pz);group.add(ring);
+      if(i%2===0){const post=new THREE.Mesh(new THREE.BoxGeometry(.28,4,.28),white);post.position.set(px,2.2,pz);group.add(post);}
     }
+    const slide=new THREE.Mesh(new THREE.BoxGeometry(2.2,.32,8.2),white);slide.position.set(x-5.7,2.4,z+5.2);slide.rotation.x=-.42;group.add(slide);
   }
 
-  function addOcbcCentre(group,x,z){
-    const concrete=new THREE.MeshStandardMaterial({color:0xbcb9af,roughness:.78}),dark=new THREE.MeshStandardMaterial({color:0x4f5d61,roughness:.42,metalness:.06});
-    const core=new THREE.Mesh(new THREE.BoxGeometry(23,132,31),concrete);core.position.set(x,66,z);group.add(core);
-    for(let y=12;y<126;y+=13){const slit=new THREE.Mesh(new THREE.BoxGeometry(23.4,2.4,31.4),dark);slit.position.set(x,y,z);group.add(slit);}
+  function addToaPayohTownPark(group,x,z){
+    const water=new THREE.MeshStandardMaterial({color:0x638f95,roughness:.30,metalness:.02,transparent:true,opacity:.88}),
+          pale=new THREE.MeshStandardMaterial({color:0xc9dce0,roughness:.62,metalness:.03}),
+          paleDark=new THREE.MeshStandardMaterial({color:0x91adb5,roughness:.55}),
+          green=new THREE.MeshStandardMaterial({color:0x5d815b,roughness:1}),
+          stone=new THREE.MeshStandardMaterial({color:0x8f938f,roughness:.95}),
+          glass=new THREE.MeshStandardMaterial({color:0x91b9c5,roughness:.18,metalness:.08,transparent:true,opacity:.44,side:THREE.DoubleSide});
+    const pond=new THREE.Mesh(new THREE.CircleGeometry(22,36),water);pond.rotation.x=-Math.PI/2;pond.scale.y=.58;pond.position.set(x+10,.08,z+4);group.add(pond);
+    const island=new THREE.Mesh(new THREE.CylinderGeometry(5.6,6,.3,18),green);island.position.set(x+12,.16,z+4);group.add(island);
+    const path=new THREE.Mesh(new THREE.BoxGeometry(27,.16,2.4),stone);path.position.set(x-4,.12,z-4);path.rotation.y=-.25;group.add(path);
+    const tx=x-10,tz=z-5;
+    // The real 25 m lookout tower is a pale, open-frame tower with an octagonal observation head.
+    const shaft=new THREE.Mesh(new THREE.BoxGeometry(3.1,20.5,3.1),pale);shaft.position.set(tx,10.25,tz);group.add(shaft);
+    [[-2.15,-2.15],[2.15,-2.15],[-2.15,2.15],[2.15,2.15]].forEach(([dx,dz])=>{
+      const col=new THREE.Mesh(new THREE.BoxGeometry(.42,20,.42),paleDark);col.position.set(tx+dx,10,tz+dz);group.add(col);
+    });
+    [5.0,10.2,15.4].forEach(y=>{
+      const landing=new THREE.Mesh(new THREE.BoxGeometry(5.1,.34,5.1),pale);landing.position.set(tx,y,tz);group.add(landing);
+      const rail=new THREE.Mesh(new THREE.TorusGeometry(3.05,.11,4,8),paleDark);rail.rotation.x=Math.PI/2;rail.rotation.z=Math.PI/8;rail.position.set(tx,y+.85,tz);group.add(rail);
+    });
+    const deck=new THREE.Mesh(new THREE.CylinderGeometry(4.5,4.1,1.25,8),pale);deck.position.set(tx,21.2,tz);group.add(deck);
+    const cabin=new THREE.Mesh(new THREE.CylinderGeometry(4.2,4.2,3.0,8,1,true),glass);cabin.position.set(tx,23.05,tz);group.add(cabin);
+    const canopy=new THREE.Mesh(new THREE.CylinderGeometry(4.75,4.3,.7,8),pale);canopy.position.set(tx,24.9,tz);group.add(canopy);
+  }
+
+  function addVipBlock53(group,x,z){
+    const cream=new THREE.MeshStandardMaterial({color:0xd7d0bc,roughness:.83}),band=new THREE.MeshStandardMaterial({color:0xa96d52,roughness:.72}),roof=new THREE.MeshStandardMaterial({color:0x8a8c82,roughness:.78});
+    for(let i=0;i<3;i++){
+      const a=i*Math.PI*2/3,wing=new THREE.Mesh(new THREE.BoxGeometry(11,57,28),cream);wing.position.set(x+Math.cos(a)*6.2,28.5,z+Math.sin(a)*6.2);wing.rotation.y=-a;group.add(wing);
+      for(let y=7;y<56;y+=6){const b=new THREE.Mesh(new THREE.BoxGeometry(11.2,.42,28.2),band);b.position.set(wing.position.x,y,wing.position.z);b.rotation.y=wing.rotation.y;group.add(b);}
+    }
+    const tank=new THREE.Mesh(new THREE.CylinderGeometry(2.4,2.4,8,12),roof);tank.position.set(x,63,z);group.add(tank);
+    const cap=new THREE.Mesh(new THREE.CylinderGeometry(3.3,3.3,1.2,12),roof);cap.position.set(x,67.4,z);group.add(cap);
+    const label=makeLandmarkSign('53',{w:4.5,h:2.2,bg:'#f2efe5',fg:'#944d3c',font:72});
+    if(label){label.position.set(x,11,z-15.0);group.add(label);}
+  }
+
+  function addBlock157(group,x,z){
+    const cream=new THREE.MeshStandardMaterial({color:0xd5cdb8,roughness:.84}),accent=new THREE.MeshStandardMaterial({color:0x8ca5a0,roughness:.72});
+    for(let i=0;i<13;i++){
+      const a=-1.12+i*(2.24/12),r=31,px=x+Math.sin(a)*r,pz=z+Math.cos(a)*r;
+      const b=new THREE.Mesh(new THREE.BoxGeometry(8.5,31,8.5),cream);b.position.set(px,15.5,pz);b.rotation.y=a;group.add(b);
+      if(i%2===0){const stripe=new THREE.Mesh(new THREE.BoxGeometry(8.8,1.0,8.8),accent);stripe.position.set(px,19,pz);stripe.rotation.y=a;group.add(stripe);}
+    }
+    const label=makeLandmarkSign('157',{w:5.6,h:2.0,bg:'#e9e3d4',fg:'#5c7f7a',font:68});
+    if(label){label.position.set(x,9.2,z-31.2);group.add(label);}
+  }
+
+  function addCentralHorizon(group,x,z){
+    const cream=new THREE.MeshStandardMaterial({color:0xd4d0c3,roughness:.8}),glass=new THREE.MeshStandardMaterial({color:0x78939d,roughness:.32,metalness:.05}),gold=new THREE.MeshStandardMaterial({color:0xc5a65f,roughness:.5,metalness:.12});
+    [-28,-14,0,14,28].forEach((dx,i)=>{
+      const h=79+(i%2)*5,t=new THREE.Mesh(new THREE.BoxGeometry(10.5,h,16),cream);t.position.set(x+dx,h/2,z+(i%2?3:-2));group.add(t);
+      const core=new THREE.Mesh(new THREE.BoxGeometry(3.0,h-6,16.3),glass);core.position.set(x+dx+3.8,(h-6)/2+2.5,z+(i%2?3:-2));group.add(core);
+      const crown=new THREE.Mesh(new THREE.BoxGeometry(12.5,4.0,18),gold);crown.position.set(x+dx,h+2,z+(i%2?3:-2));group.add(crown);
+    });
+  }
+
+  function makeLandmarkSign(text,{w=8,h=2,bg='#f2c500',fg='#222',font=54}={}){
+    const canvas=document.createElement('canvas');canvas.width=512;canvas.height=128;
+    const ctx=canvas.getContext('2d');if(!ctx)return null;
+    ctx.fillStyle=bg;ctx.fillRect(0,0,512,128);
+    ctx.fillStyle=fg;ctx.textAlign='center';ctx.textBaseline='middle';
+    ctx.font=`800 ${font}px -apple-system,BlinkMacSystemFont,Arial,sans-serif`;
+    ctx.fillText(String(text||'').slice(0,28),256,66,470);
+    const tex=new THREE.CanvasTexture(canvas);tex.colorSpace=THREE.SRGBColorSpace;tex.minFilter=THREE.LinearFilter;tex.magFilter=THREE.LinearFilter;
+    const mat=new THREE.MeshBasicMaterial({map:tex,toneMapped:false,transparent:false,side:THREE.DoubleSide});
+    const mesh=new THREE.Mesh(new THREE.PlaneGeometry(w,h),mat);mesh.userData.ephemeralTexture=tex;return mesh;
+  }
+
+  function addToaPayohMall(group,x,z){
+    const white=new THREE.MeshStandardMaterial({color:0xd9d9d2,roughness:.82}),
+          blue=new THREE.MeshStandardMaterial({color:0x547f93,roughness:.70}),
+          tile=new THREE.MeshStandardMaterial({color:0xb9aaa0,roughness:.94}),
+          awning=new THREE.MeshStandardMaterial({color:0xa94e32,roughness:.84}),
+          yellow=new THREE.MeshStandardMaterial({color:0xf0c81f,roughness:.58}),
+          dark=new THREE.MeshStandardMaterial({color:0x31383a,roughness:.8});
+    // Long, low-rise pedestrian mall: the familiar heartland contrast against surrounding towers.
+    const plaza=new THREE.Mesh(new THREE.BoxGeometry(38,.18,11),tile);plaza.position.set(x,.10,z);group.add(plaza);
+    [-8.7,8.7].forEach(dz=>{
+      const block=new THREE.Mesh(new THREE.BoxGeometry(38,8.4,6.3),white);block.position.set(x,4.2,z+dz);group.add(block);
+      const upper=new THREE.Mesh(new THREE.BoxGeometry(38.2,3.0,6.45),blue);upper.position.set(x,6.7,z+dz);group.add(upper);
+      const roof=new THREE.Mesh(new THREE.BoxGeometry(38.5,.55,7.4),awning);roof.position.set(x,8.7,z+dz);group.add(roof);
+      for(let i=-4;i<=4;i++){
+        const shop=new THREE.Mesh(new THREE.BoxGeometry(3.1,2.6,.16),dark);shop.position.set(x+i*4.0,2.1,z+dz+(dz<0?3.24:-3.24));group.add(shop);
+      }
+    });
+    // Yellow Toa Payoh Mall gateway seen at the pedestrian entrance.
+    const gx=x-16,gz=z;
+    [-5.1,5.1].forEach(dz=>{const post=new THREE.Mesh(new THREE.BoxGeometry(1.0,7.2,1.0),yellow);post.position.set(gx,3.6,gz+dz);group.add(post);});
+    const beam=new THREE.Mesh(new THREE.BoxGeometry(1.0,1.05,11.1),yellow);beam.position.set(gx,6.9,gz);group.add(beam);
+    const sign=makeLandmarkSign('TOA PAYOH MALL',{w:8.8,h:1.65,bg:'#f0c81f',fg:'#344046',font:46});
+    if(sign){sign.position.set(gx-.53,6.65,gz);sign.rotation.y=Math.PI/2;group.add(sign);}
+    // small clock disc at the gateway
+    const clockFace=new THREE.Mesh(new THREE.CylinderGeometry(1.0,1.0,.16,24),new THREE.MeshStandardMaterial({color:0xf4efe2,roughness:.7}));
+    clockFace.rotation.z=Math.PI/2;clockFace.position.set(gx-.62,8.15,gz);group.add(clockFace);
+  }
+
+  function addShuangLinMonastery(group,x,z){
+    const wall=new THREE.MeshStandardMaterial({color:0xd9c7a2,roughness:.9}),
+          red=new THREE.MeshStandardMaterial({color:0x8d3628,roughness:.8}),
+          roof=new THREE.MeshStandardMaterial({color:0x5d6660,roughness:.78}),
+          gold=new THREE.MeshStandardMaterial({color:0xc9a74c,roughness:.42,metalness:.16}),
+          stone=new THREE.MeshStandardMaterial({color:0xa7a192,roughness:.92});
+    const courtyard=new THREE.Mesh(new THREE.BoxGeometry(52,.16,38),stone);courtyard.position.set(x,.09,z);group.add(courtyard);
+    const hall=new THREE.Mesh(new THREE.BoxGeometry(30,7.8,17),wall);hall.position.set(x-7,3.9,z+6);group.add(hall);
+    const hallRoof=new THREE.Mesh(new THREE.ConeGeometry(18,5.5,4),roof);hallRoof.rotation.y=Math.PI/4;hallRoof.scale.z=.62;hallRoof.position.set(x-7,10.2,z+6);group.add(hallRoof);
+    const gate=new THREE.Mesh(new THREE.BoxGeometry(20,5.6,4.5),wall);gate.position.set(x-7,2.8,z-13);group.add(gate);
+    const gateRoof=new THREE.Mesh(new THREE.ConeGeometry(12,4.0,4),red);gateRoof.rotation.y=Math.PI/4;gateRoof.scale.z=.48;gateRoof.position.set(x-7,6.4,z-13);group.add(gateRoof);
+    // Seven-storey tapering pagoda, the strongest silhouette from the road.
+    const px=x+17,pz=z+3;
+    for(let i=0;i<7;i++){
+      const y=i*3.25+1.4,scale=1-i*.075;
+      const level=new THREE.Mesh(new THREE.CylinderGeometry(2.6*scale,2.9*scale,2.5,8),wall);level.position.set(px,y,pz);group.add(level);
+      const eave=new THREE.Mesh(new THREE.CylinderGeometry(4.0*scale,2.8*scale,.55,8),roof);eave.position.set(px,y+1.5,pz);group.add(eave);
+    }
+    const finial=new THREE.Mesh(new THREE.ConeGeometry(.75,3.3,8),gold);finial.position.set(px,25.5,pz);group.add(finial);
   }
 
   function buildEmergencyWorld() {
@@ -4400,7 +4476,7 @@
     roads.forEach((line,idx)=>{
       const points=line.map(([x,z])=>({x,z}));
       for(let i=0;i<points.length-1;i++){
-        const seg={ax:points[i].x,az:points[i].z,bx:points[i+1].x,bz:points[i+1].z,width:idx<4?9.5:7,major:idx<4,lanes:2,type:idx<4?'primary':'residential',oneway:'',name:'DriveSG demo road',speedLimit:50};
+        const seg={ax:points[i].x,az:points[i].z,bx:points[i+1].x,bz:points[i+1].z,width:idx<4?9.5:7,major:idx<4,lanes:2,type:idx<4?'primary':'residential',oneway:'',name:'Local road',speedLimit:50};
         segments.push(seg); appendRoadQuad(roadVerts,seg,.025); if(idx<4)appendCenterDashes(lineVerts,seg);
       }
     });
@@ -4445,7 +4521,7 @@
     activeTerrainPatch=built.terrainPatch||null;
     rebuildRoadIndex();
     rebuildBuildingIndex();
-    try{createAmbientTraffic(dynamicWorld,roadSegments,roadGraph);}catch(err){console.warn('Traffic setup skipped',err?.message||err);ambientTraffic=[];}
+    ambientTraffic=[]; // Toa Payoh focus build: no ambient public traffic
     if(navigation.active&&navigation.mode==='route')try{renderNavigationWorld();}catch(err){console.warn('Route redraw skipped',err?.message||err);}
     if(previous){scene.remove(previous);try{disposeWorldGroup(previous);}catch(err){console.warn('Previous world cleanup skipped',err?.message||err);}}
     console.info(`DriveSG world: ${built.roadCount} road ways, ${built.buildingCount} buildings, ${built.trafficSignalCount||0} signals, ${built.streetLightCount||0} lights, ${built.roadSignCount||0} road signs, ${(built.treeCount||0)+(built.tropicalPlantCount||0)} plants, ${built.segments.length} segments`);
@@ -4759,7 +4835,7 @@
     const coords=unproject(car.position.x,car.position.z);
     if(!insideSingapore(coords.lat,coords.lon)){
       car.position.x=beforeX;car.position.z=beforeZ;speedMps*=.15;lateralSlipMps=0;yawVelocity=0;
-      showToast('Singapore boundary reached');
+      showToast('Toa Payoh boundary');
     }else if(!panelOpen){
       const moved=Math.hypot(car.position.x-beforeX,car.position.z-beforeZ);
       if(moved<5) sessionDistanceM+=moved;
@@ -4772,7 +4848,7 @@
       onRoad=edgeDist<3.0;
       els.surfaceState.textContent=inTunnel?'TUNNEL':(onRoad?'ON ROAD':'OFF ROAD');
       els.surfaceState.classList.toggle('offroad',!onRoad);
-      const label=hit?.seg?.name || (onRoad?'Singapore road':'Off road');
+      const label=hit?.seg?.name || (onRoad?'Toa Payoh road':'Off road');
       if(label!==lastRoadLabel){lastRoadLabel=label;if(els.roadName)els.roadName.textContent=label;}
       const limit=onRoad?(hit?.seg?.speedLimit||null):null;
       if(limit!==lastSpeedLimit){
@@ -4865,46 +4941,16 @@
     if(horizonHaze){horizonHaze.position.x=car.position.x;horizonHaze.position.z=car.position.z;}
   }
 
-  function maybeStreamWorld(elapsed) {
-    if(mapMode!=='live'||streamBusy||elapsed-lastStreamAttempt<STREAM_RETRY_SECONDS)return;
-    const dist=Math.hypot(car.position.x-loadedCenterWorld.x,car.position.z-loadedCenterWorld.z);
-    if(dist<STREAM_TRIGGER_METERS)return;
-    const fx=Math.sin(car.rotation.y),fz=Math.cos(car.rotation.y),lead=145+Math.min(95,Math.abs(speedMps)*3.1);
-    const centerX=car.position.x+fx*lead,centerZ=car.position.z+fz*lead,coords=unproject(centerX,centerZ);
-    if(!insideSingapore(coords.lat,coords.lon))return;
-    lastStreamAttempt=elapsed;
-    streamAroundCar(coords,centerX,centerZ);
+  function maybeStreamWorld(_elapsed) {
+    // Toa Payoh focus: keep one stable world in memory instead of rebuilding scenery while driving.
   }
 
-  async function streamAroundCar(coords,centerX,centerZ) {
-    streamBusy=true;
-    setMapState('loading');
-    const generation=streamGeneration;
-    try{
-      const [data,terrain]=await Promise.all([fetchOsmData(coords.lat,coords.lon),fetchTerrainPatch(coords.lat,coords.lon)]);
-      if(generation!==streamGeneration)return;
-      const built=buildWorld(data,{centerX,centerZ},terrain);
-      if(built.roadCount<3)throw new Error('Insufficient streamed roads');
-      const near=nearestRoadDistanceIn(car.position.x,car.position.z,built.segments);
-      if(!Number.isFinite(near)||near>40)throw new Error('Streamed map does not cover the car');
-      swapDynamicWorld(built);
-      warmSceneShaders();
-      loadedCenterWorld={x:centerX,z:centerZ};
-      setMapState('live');
-    }catch(err){
-      if(generation!==streamGeneration)return;
-      console.warn('Background road refresh failed; keeping current world.',err);
-      setMapState('offline');
-      setTimeout(()=>{ if(mapMode==='live'&&generation===streamGeneration)setMapState('live'); },2500);
-    }finally{if(generation===streamGeneration)streamBusy=false;}
+  async function streamAroundCar(_coords,_centerX,_centerZ) {
+    return false;
   }
 
-  function maybePrefetchRouteAhead(elapsed){
-    if(routePrefetchBusy||streamBusy||navigation.mode!=='route'||!navigation.active||navigation.routeCoords.length<2||elapsed-lastRoutePrefetch<ROUTE_PREFETCH_INTERVAL)return;
-    const target=Math.min(navigation.totalM,navigation.progressM+ROUTE_PREFETCH_METERS);let idx=navigation.cumulativeM.findIndex(v=>v>=target);if(idx<0)idx=navigation.routeCoords.length-1;
-    const c=navigation.routeCoords[idx];if(!c||!insideSingapore(c.lat,c.lon))return;
-    lastRoutePrefetch=elapsed;routePrefetchBusy=true;
-    Promise.allSettled([fetchOsmData(c.lat,c.lon),fetchTerrainPatch(c.lat,c.lon)]).finally(()=>{routePrefetchBusy=false;});
+  function maybePrefetchRouteAhead(_elapsed){
+    // No long-distance route prefetch in the town-only build.
   }
 
   function initialiseGraphicsTier(){
@@ -5037,7 +5083,7 @@
 
   async function shareDriveSG(){
     const url=`${location.origin}${location.pathname}`;
-    const data={title:'DriveSG',text:'Drive Singapore in your browser.',url};
+    const data={title:'DriveSG · Toa Payoh',text:'Drive Toa Payoh in your browser.',url};
     try{
       if(navigator.share){await navigator.share(data);return;}
       if(navigator.clipboard?.writeText){await navigator.clipboard.writeText(url);showToast('DriveSG link copied');return;}
@@ -5063,7 +5109,7 @@
     if(guardsInstalled)return;guardsInstalled=true;
     window.addEventListener('error',e=>recordDiagnostic('window-error',e?.message||e?.error?.message||'Unknown error'));
     window.addEventListener('unhandledrejection',e=>recordDiagnostic('promise-rejection',e?.reason?.message||e?.reason||'Unhandled rejection'));
-    window.addEventListener('offline',()=>{setMapState('offline');showToast('Offline · using cached DriveSG where available');});
+    window.addEventListener('offline',()=>{setMapState('offline');showToast('Connection lost · cached map available');});
     window.addEventListener('online',()=>{setMapState(mapMode==='live'?'live':'offline');showToast('Back online');backendCircuitUntil=0;backendFailureCount=0;});
     window.addEventListener('pagehide',()=>{
       clearInputs();
@@ -5267,7 +5313,7 @@
     navigator.geolocation.getCurrentPosition(
       pos=>{
         const lat=pos.coords.latitude,lon=pos.coords.longitude;
-        if(!insideSingapore(lat,lon)){els.searchMsg.textContent='Your current location appears to be outside Singapore.';return;}
+        if(!insideSingapore(lat,lon)){els.searchMsg.textContent='Your location is outside Toa Payoh.';return;}
         handlePlaceChoice({name:'My location',subtitle:'Current location',lat,lon});
       },
       ()=>{els.searchMsg.textContent='Safari did not provide your location. You can pick a place below instead.';},
@@ -5277,7 +5323,7 @@
 
   async function searchSingapore(query) {
     const key=query.trim().toLowerCase();
-    els.searchMsg.textContent='Searching Singapore…';
+    els.searchMsg.textContent='Searching Toa Payoh…';
     try{
       let place=geocodeCache.get(key);
       if(!place){
@@ -5287,15 +5333,15 @@
           if(BACKEND_ACTIVE){
             try{
               const res=await backendFetch(`/api/geocode?q=${encodeURIComponent(query)}`,{headers:{Accept:'application/json'},signal:controller.signal});
-              if(res.ok){const data=await res.json();const lat=Number(data.lat),lon=Number(data.lon);if(insideSingapore(lat,lon))place={name:data.name||query,subtitle:data.subtitle||'Singapore destination',lat,lon};}
+              if(res.ok){const data=await res.json();const lat=Number(data.lat),lon=Number(data.lon);if(insideSingapore(lat,lon))place={name:data.name||query,subtitle:data.subtitle||'Toa Payoh destination',lat,lon};}
             }catch(err){console.warn('DriveSG geocode backend bypass',err?.message||err);}
           }
           if(!place){
-            const url=`${GEOCODE_ENDPOINT}?format=jsonv2&limit=1&countrycodes=sg&accept-language=en&q=${encodeURIComponent(query+', Singapore')}`;
+            const url=`${GEOCODE_ENDPOINT}?format=jsonv2&limit=1&countrycodes=sg&accept-language=en&q=${encodeURIComponent(query+', Toa Payoh, Singapore')}`;
             const res=await fetch(url,{headers:{Accept:'application/json'},signal:controller.signal});
             if(!res.ok)throw new Error(`Search ${res.status}`);
             const results=await res.json();if(!results.length)throw new Error('No match');
-            const lat=Number(results[0].lat),lon=Number(results[0].lon);if(!insideSingapore(lat,lon))throw new Error('Outside Singapore');
+            const lat=Number(results[0].lat),lon=Number(results[0].lon);if(!insideSingapore(lat,lon))throw new Error('Outside Toa Payoh');
             const label=(results[0].display_name||query).split(',')[0];
             place={name:label,subtitle:'Search result',lat,lon};
           }
@@ -5304,7 +5350,7 @@
       }
       els.searchMsg.textContent='';
       handlePlaceChoice(place);
-    }catch(err){console.warn(err);els.searchMsg.textContent='Could not find that. Try a Singapore road, district or landmark.';}
+    }catch(err){console.warn(err);els.searchMsg.textContent='Try a Toa Payoh road or place.';}
   }
 
   function insideSingapore(lat,lon){return lat>=SG_BOUNDS.minLat&&lat<=SG_BOUNDS.maxLat&&lon>=SG_BOUNDS.minLon&&lon<=SG_BOUNDS.maxLon;}
@@ -5316,7 +5362,7 @@
     lastRoadLabel='';
     if(els.tripDistance)els.tripDistance.textContent='0 m';
     if(els.topSpeed)els.topSpeed.textContent='0';
-    if(els.roadName)els.roadName.textContent=currentLocationName || 'Singapore road';
+    if(els.roadName)els.roadName.textContent=currentLocationName || 'Toa Payoh road';
   }
 
   function formatTripDistance(meters){
@@ -5324,7 +5370,7 @@
     return `${(meters/1000).toFixed(meters<10000?1:0)} km`;
   }
 
-  function showLoader(text,pct){els.loader.classList.remove('hidden');els.loaderTitle.textContent='Building Singapore';setProgress(pct,text);}
+  function showLoader(text,pct){els.loader.classList.remove('hidden');els.loaderTitle.textContent='Loading Toa Payoh';setProgress(pct,text);}
   function hideLoader(){els.loader.classList.add('hidden');}
   function setProgress(pct,text){const p=Math.max(0,Math.min(100,pct));els.progressBar.style.width=`${p}%`;els.progressLabel.textContent=`${Math.round(p)}%`;if(text)els.loaderText.textContent=text;}
 

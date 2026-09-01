@@ -822,3 +822,36 @@ body.navigating .weather-badge{opacity:0!important;transform:translateX(-50%) tr
 @media (max-height:410px){.drive-hint{display:none!important}.panel-head h1{font-size:22px}}
 
 .ui-hidden-copy{display:none!important}
+
+
+/* Toa Payoh focused prototype */
+.town-hidden{display:none!important}
+:root{--accent:#b5ebb9;--accent-2:#91cfea;--panel-bg:rgba(8,17,18,.88)}
+.places-panel{max-width:390px;background:linear-gradient(180deg,rgba(11,21,21,.95),rgba(7,14,15,.93));box-shadow:0 22px 65px rgba(0,0,0,.36)}
+.panel-head h1{letter-spacing:-.035em;font-weight:780}
+.experience-launch{grid-template-columns:1fr 112px;gap:10px}
+.experience-hero{min-height:94px;position:relative;overflow:hidden;background:linear-gradient(135deg,rgba(175,232,178,.19),rgba(97,161,181,.12)),rgba(255,255,255,.045);border-color:rgba(188,235,194,.20)}
+.experience-hero:after{content:'';position:absolute;right:-22px;bottom:-28px;width:132px;height:98px;opacity:.16;background:linear-gradient(90deg,transparent 8%,#d8d1bd 9% 24%,transparent 25% 30%,#d8d1bd 31% 47%,transparent 48% 54%,#d8d1bd 55% 73%,transparent 74%);transform:skewY(-8deg);pointer-events:none}
+.experience-hero strong{font-size:16px}.experience-hero em{opacity:.68}
+.island-map-btn{min-height:94px;border-color:rgba(255,255,255,.10);background:rgba(255,255,255,.035)}
+.search-row{margin-top:12px}.search-row input{background:rgba(255,255,255,.055);border-color:rgba(255,255,255,.09)}
+.preset-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+.preset-grid button{min-height:58px;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.075);border-radius:15px;text-align:left;padding:11px 12px}
+.preset-grid button:hover,.preset-grid button:active{background:rgba(181,235,185,.10);border-color:rgba(181,235,185,.20)}
+.discover-section .discover-panel-head{margin-bottom:12px}.guided-drive{background:linear-gradient(135deg,rgba(255,255,255,.052),rgba(255,255,255,.025));border-color:rgba(255,255,255,.08)}
+.discovery-card small{display:none}.discovery-card p{margin-bottom:0}.discovery-card{max-width:320px;background:rgba(9,18,18,.91);backdrop-filter:blur(18px);border-color:rgba(188,235,194,.16)}
+.area-ribbon{background:rgba(8,16,16,.84);border-color:rgba(188,235,194,.14)}
+.area-ribbon span{color:#b5ebb9}.area-ribbon small{opacity:.62}
+.postcard-stats{grid-template-columns:repeat(2,minmax(0,1fr))}.journey-postcard-card{border-color:rgba(188,235,194,.16)}
+.hop-map-shell{max-width:980px}.hop-map-tip{font-size:11px;opacity:.65}
+.drive-hud{background:rgba(5,11,12,.72);border-color:rgba(255,255,255,.08);backdrop-filter:blur(14px)}
+.dynamics-indicators .dyn.grip{color:#b5ebb9}
+.weather-badge{opacity:.82}
+#creditsBtn{opacity:.58}
+@media(max-width:760px){.places-panel{max-width:350px}.experience-launch{grid-template-columns:1fr 96px}.experience-hero,.island-map-btn{min-height:82px}.preset-grid button{min-height:52px;padding:9px 10px}.discovery-card{max-width:285px}}
+
+
+/* Toa Payoh focus: keep the driving HUD quiet unless a vehicle/signal state actually needs attention. */
+.dyn.grip:not(.wet):not(.warn){display:none}
+#absIndicator:not(.active),#tcsIndicator:not(.active){display:none}
+.dynamics-indicators:not(:has(.dyn.active,.dyn.grip.wet,.dyn.grip.warn,.dyn.signal:not(.hidden))){display:none}

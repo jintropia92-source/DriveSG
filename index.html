@@ -9,8 +9,8 @@
   <meta name="apple-mobile-web-app-title" content="DriveSG" />
   <meta name="format-detection" content="telephone=no" />
   <meta name="color-scheme" content="dark" />
-  <title>DriveSG — Singapore, playable.</title>
-  <link rel="stylesheet" href="styles.css?b=20260901fix2" />
+  <title>DriveSG — Toa Payoh</title>
+  <link rel="stylesheet" href="styles.css?b=20260901toa2" />
   <script>window.DRIVESG_CONFIG={backendBase:'https://drivesg-api.vercel.app'};</script>
 </head>
 <body>
@@ -28,10 +28,10 @@
     <header class="topbar">
       <button id="placesBtn" class="place-pill" type="button" aria-label="Open places and navigation">
         <span class="live-dot" id="mapDot"></span>
-        <span class="place-copy"><strong id="locationName">Marina Bay</strong><small id="placeEyebrow"></small></span>
+        <span class="place-copy"><strong id="locationName">Town Centre</strong><small id="placeEyebrow"></small></span>
         <span class="chevron">⌄</span>
       </button>
-      <div id="weatherBadge" class="weather-badge" aria-live="polite"><span id="weatherIcon">◐</span><span id="weatherText">Singapore weather</span></div>
+      <div id="weatherBadge" class="weather-badge" aria-live="polite"><span id="weatherIcon">◐</span><span id="weatherText">Weather</span></div>
       <div class="top-actions">
         <button id="lightingBtn" class="round-action" type="button" aria-label="Cycle lighting mode" title="Lighting: Auto">☀</button>
         <button id="soundBtn" class="round-action" type="button" aria-label="Toggle engine sound" title="Engine sound">♪</button>
@@ -63,20 +63,20 @@
           <button id="mapOrientationBtn" type="button" aria-label="Toggle map orientation">↗</button>
         </div>
       </div>
-      <div id="miniMapFooter" class="minimap-footer">Explore Singapore</div>
+      <div id="miniMapFooter" class="minimap-footer">Toa Payoh</div>
     </section>
 
     <aside id="placesPanel" class="places-panel open" aria-label="Places and navigation">
       <div class="panel-head">
         <div>
           
-          <h1 id="panelTitle">Where in Singapore?</h1><p id="panelIntro" class="ui-hidden-copy"></p>
+          <h1 id="panelTitle">Toa Payoh</h1><p id="panelIntro" class="ui-hidden-copy"></p>
           
         </div>
         <button id="closePanelBtn" class="close-btn" type="button" aria-label="Close places">×</button>
       </div>
 
-      <div class="mode-switch three" role="group" aria-label="Drive mode">
+      <div class="mode-switch three town-hidden" role="group" aria-label="Drive mode">
         <button id="navigateModeBtn" class="active" type="button">Navigate</button>
         <button id="startModeBtn" type="button">Start here</button>
         <button id="challengeModeBtn" type="button">Challenges</button>
@@ -86,19 +86,19 @@
         <div class="experience-launch">
           <button id="discoverSingaporeBtn" class="experience-hero" type="button">
             <span class="experience-icon">✦</span>
-            <span><strong>Discover Singapore</strong><em>Scenic drives</em></span>
+            <span><strong>Explore Toa Payoh</strong><em>3 short drives</em></span>
             <b>›</b>
           </button>
-          <button id="hopMapBtn" class="island-map-btn" type="button"><span>⌖</span><strong>Island map</strong></button>
+          <button id="hopMapBtn" class="island-map-btn" type="button"><span>⌖</span><strong>Town map</strong></button>
         </div>
 
-        <div class="quick-row">
+        <div class="quick-row town-hidden">
           <button id="nearMeBtn" class="quick-btn" type="button"><span>◎</span><strong>My location</strong></button>
           <button id="randomBtn" class="quick-btn" type="button"><span>↝</span><strong id="randomBtnLabel">Surprise me</strong></button>
         </div>
 
         <form id="searchForm" class="search-row" role="search">
-          <input id="searchInput" autocomplete="off" autocapitalize="words" enterkeyhint="search" inputmode="search" placeholder="Search destination, e.g. Bugis" aria-label="Search Singapore place" />
+          <input id="searchInput" autocomplete="off" autocapitalize="words" enterkeyhint="search" inputmode="search" placeholder="Search Toa Payoh road or place" aria-label="Search Toa Payoh place" />
           <button type="submit">Go</button>
         </form>
         <div id="searchMsg" class="search-msg" aria-live="polite"></div>
@@ -112,7 +112,7 @@
         <div id="presetGrid" class="preset-grid"></div>
       </div>
 
-      <section id="challengeSection" class="challenge-section hidden" aria-label="Drive challenges">
+      <section id="challengeSection" class="challenge-section hidden town-hidden" aria-label="Drive challenges">
         <div class="challenge-lead">
           <span class="section-label">CHALLENGES</span>
           <strong id="challengeProgressLabel">0 completed</strong>
@@ -120,12 +120,12 @@
         <div id="challengeGrid" class="challenge-grid"></div>
       </section>
 
-      <section id="discoverSection" class="discover-section hidden" aria-label="Discover Singapore">
+      <section id="discoverSection" class="discover-section hidden" aria-label="Explore Toa Payoh">
         <div class="discover-panel-head">
           <button id="discoverBackBtn" class="discover-back" type="button">‹ Back</button>
           <div><strong>Discover</strong></div>
         </div>
-        <div class="passport-card">
+        <div class="passport-card town-hidden">
           <div><span>PASSPORT</span><strong id="passportProgress">0 / 0</strong></div>
           <div class="passport-track"><i id="passportBar"></i></div>
         </div>
@@ -144,35 +144,35 @@
 
 
     <section id="areaRibbon" class="area-ribbon" aria-live="polite">
-      <span id="areaRibbonEyebrow">YOU'RE ENTERING</span>
-      <strong id="areaRibbonTitle">Marina Bay</strong>
-      <small id="areaRibbonText">Singapore's modern waterfront skyline.</small>
+      <span id="areaRibbonEyebrow">TOA PAYOH</span>
+      <strong id="areaRibbonTitle">Town Centre</strong>
+      <small id="areaRibbonText">Heartland streets.</small>
     </section>
 
     <section id="discoveryCard" class="discovery-card" aria-live="polite">
       <button id="discoveryCardClose" type="button" aria-label="Dismiss">×</button>
       <span id="discoveryKicker">DISCOVERED</span>
-      <strong id="discoveryTitle">Marina Bay Sands</strong>
-      <p id="discoveryText">One of Singapore's most recognisable skyline landmarks.</p>
-      <small id="discoveryDriveNote">Singapore drives on the left.</small>
+      <strong id="discoveryTitle">HDB Hub</strong>
+      <p id="discoveryText">Town Centre.</p>
+      <small id="discoveryDriveNote"></small>
     </section>
 
     <section id="journeyPostcard" class="journey-postcard" role="dialog" aria-modal="true" aria-labelledby="journeyPostcardTitle">
       <div class="journey-postcard-card">
-        <div class="postcard-sky"><span>DRIVESG · SINGAPORE</span><b id="journeyPostcardBadge">SCENIC DRIVE COMPLETE</b></div>
+        <div class="postcard-sky"><span>DRIVESG · TOA PAYOH</span><b id="journeyPostcardBadge">SCENIC DRIVE COMPLETE</b></div>
         <div class="postcard-copy">
           <span class="section-label">JOURNEY COMPLETE</span>
-          <h2 id="journeyPostcardTitle">Skyline to Orchard</h2>
-          <p id="journeyPostcardRoute">Marina Bay → Orchard</p>
+          <h2 id="journeyPostcardTitle">First Drive</h2>
+          <p id="journeyPostcardRoute">Town Centre → Dragon Playground</p>
           <div class="postcard-stats">
             <div><strong id="journeyPostcardTime">12 min</strong><span>DRIVE TIME</span></div>
             <div><strong id="journeyPostcardLandmarks">4</strong><span>LANDMARKS</span></div>
-            <div><strong id="journeyPostcardPassport">8 / 28</strong><span>PASSPORT</span></div>
+            <div class="town-hidden"><strong id="journeyPostcardPassport">0 / 0</strong><span>DISCOVERED</span></div>
           </div>
-          <small id="journeyPostcardNote">You’ve experienced another side of Singapore.</small>
+          <small id="journeyPostcardNote">Toa Payoh drive complete.</small>
           <div class="postcard-actions">
             <button id="journeyContinueBtn" type="button">Keep driving</button>
-            <button id="journeyAnotherBtn" class="primary" type="button">Another scenic drive</button>
+            <button id="journeyAnotherBtn" class="primary" type="button">Another drive</button>
           </div>
         </div>
       </div>
@@ -181,15 +181,15 @@
     <section id="hopMapOverlay" class="hop-map-overlay" role="dialog" aria-modal="true" aria-labelledby="hopMapTitle">
       <div class="hop-map-shell">
         <header>
-          <div><h2 id="hopMapTitle">Singapore map</h2></div>
-          <button id="hopMapCloseBtn" type="button" aria-label="Close Singapore map">×</button>
+          <div><h2 id="hopMapTitle">Toa Payoh</h2></div>
+          <button id="hopMapCloseBtn" type="button" aria-label="Close Toa Payoh map">×</button>
         </header>
         <div class="hop-map-canvas-wrap">
           <canvas id="hopMapCanvas" width="1200" height="700"></canvas>
           <div class="hop-map-tip">Tap to choose</div>
         </div>
         <div id="hopMapSelection" class="hop-map-selection">
-          <div><strong id="hopMapPlaceName">Marina Bay</strong><small id="hopMapCoords">1.283, 103.859</small></div>
+          <div><strong id="hopMapPlaceName">Town Centre</strong><small id="hopMapCoords" class="town-hidden">1.3321, 103.8485</small></div>
           <div class="hop-map-actions">
             <button id="hopNavigateBtn" type="button">Guide me here</button>
             <button id="hopStartBtn" class="primary" type="button">Drive from here</button>
@@ -199,7 +199,7 @@
     </section>
 
     <section id="challengeHud" class="challenge-hud" aria-live="polite">
-      <div><span>CHALLENGE</span><strong id="challengeHudName">Singapore Drive</strong></div>
+      <div><span>CHALLENGE</span><strong id="challengeHudName">Toa Payoh Drive</strong></div>
       <div class="challenge-hud-stats"><b id="challengeTimer">0:00.0</b><small><span id="challengeScore">100</span> SCORE</small></div>
     </section>
 
@@ -208,7 +208,7 @@
     <section id="challengeResult" class="challenge-result" role="dialog" aria-modal="true" aria-labelledby="challengeResultTitle">
       <div class="challenge-result-card">
         <div class="result-kicker">DRIVE COMPLETE</div>
-        <h2 id="challengeResultTitle">Marina Sprint</h2>
+        <h2 id="challengeResultTitle">Heartland Dash</h2>
         <div class="result-hero">
           <div><span>TIME</span><strong id="challengeResultTime">0:00.0</strong><small id="challengeBestTime">PERSONAL BEST</small></div>
           <div class="result-score"><span>DRIVE SCORE</span><strong id="challengeResultScore">100</strong><small id="challengeGrade">S</small></div>
@@ -238,7 +238,7 @@
       </div>
       <div id="speedLimit" class="speed-limit hidden" aria-label="Speed limit">50</div>
       <div class="hud-meta">
-        <strong id="roadName">Marina Bay</strong>
+        <strong id="roadName">Toa Payoh</strong>
         <div class="hud-meta-line">
           <span id="surfaceState" class="surface-state">ON ROAD</span>
           <span class="hud-sep">·</span>
@@ -272,7 +272,7 @@
       <div class="loader-card">
         <div class="loader-logo">SG</div>
         <h2 id="loaderTitle">DriveSG</h2>
-        <p id="loaderText">Preparing Marina Bay…</p>
+        <p id="loaderText">Preparing Toa Payoh…</p>
         <div class="progress-track"><div id="progressBar" class="progress-bar"></div></div>
         <div class="progress-meta"><span id="progressLabel">0%</span></div>
       </div>
@@ -297,6 +297,6 @@
     </section>
   </main>
 
-  <script src="boot.js?b=20260901fix2"></script>
+  <script src="boot.js?b=20260901toa2"></script>
 </body>
 </html>
