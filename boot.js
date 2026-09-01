@@ -1,6 +1,6 @@
 (() => {
   'use strict';
-  const BUILD_ID = '20260901v2';
+  const BUILD_ID = '20260901realism1';
   const isServiceWorker = typeof ServiceWorkerGlobalScope !== 'undefined' && self instanceof ServiceWorkerGlobalScope;
 
   if (isServiceWorker) {
@@ -13,7 +13,10 @@
       `./boot.js?b=${BUILD_ID}`
     ];
     const optionalRuntime = [
-      'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js'
+      'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js',
+      'https://opengameart.org/sites/default/files/loop_0.wav',
+      'https://opengameart.org/sites/default/files/loop_2_0.wav',
+      'https://opengameart.org/sites/default/files/loop_5_0.wav'
     ];
 
     self.addEventListener('install', event => {
@@ -46,7 +49,8 @@
         /\/(?:index\.html|styles\.css|app\.js|boot\.js)$/.test(url.pathname)
       );
       const isThree = /^(?:cdn\.jsdelivr\.net|cdnjs\.cloudflare\.com|unpkg\.com)$/.test(url.hostname);
-      if (!isShell && !isThree) return;
+      const isEngineAudio = url.hostname === 'opengameart.org' && /\/loop_(?:0|2_0|5_0)\.wav$/.test(url.pathname);
+      if (!isShell && !isThree && !isEngineAudio) return;
 
       event.respondWith((async () => {
         const cache = await caches.open(CACHE);

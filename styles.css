@@ -802,3 +802,23 @@ body.navigating .weather-badge{opacity:0!important;transform:translateX(-50%) tr
 @media (orientation:landscape) and (max-width:710px){.nav-banner{left:calc(190px + var(--safe-left));width:calc(100vw - 362px - var(--safe-left) - var(--safe-right))}}
 @media (orientation:landscape) and (max-width:760px){.nav-banner{left:calc(194px + var(--safe-left));width:calc(100vw - 404px - var(--safe-left) - var(--safe-right));max-width:none}}
 @media (orientation:landscape) and (max-width:710px){.nav-banner{left:calc(190px + var(--safe-left));width:calc(100vw - 390px - var(--safe-left) - var(--safe-right))}}
+
+/* Realism 1 — cleaner presentation */
+.panel-head p,.discover-intro{display:none!important}
+.panel-head h1{margin-bottom:10px}
+.experience-hero em{opacity:.55;font-size:8px;letter-spacing:.08em;text-transform:uppercase}
+.experience-hero small,.island-map-btn small{display:none!important}
+.panel-foot{justify-content:flex-end;border-top:0!important;padding-top:4px!important}
+.panel-foot-actions{margin-left:0!important}
+.panel-share.icon-only{width:36px;padding:0;display:grid;place-items:center;font-size:13px}
+.credits-chip.hidden-credit{display:none!important}
+.place-copy strong{font-size:14px}
+.place-copy small:empty{display:none}
+.drive-hud{box-shadow:0 14px 46px rgba(0,0,0,.28),inset 0 1px 0 rgba(255,255,255,.035)}
+.gear{font-variant-numeric:tabular-nums;font-size:14px;min-width:24px;text-align:center}
+.pedal.gas,.pedal.brake{box-shadow:0 14px 34px rgba(0,0,0,.26),inset 0 1px 0 rgba(255,255,255,.10)}
+.nav-banner{box-shadow:0 15px 42px rgba(0,0,0,.26),inset 0 1px 0 rgba(255,255,255,.035)}
+.minimap-card{box-shadow:0 15px 42px rgba(0,0,0,.24)}
+@media (max-height:410px){.drive-hint{display:none!important}.panel-head h1{font-size:22px}}
+
+.ui-hidden-copy{display:none!important}

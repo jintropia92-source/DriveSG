@@ -10,7 +10,7 @@
   <meta name="format-detection" content="telephone=no" />
   <meta name="color-scheme" content="dark" />
   <title>DriveSG — Singapore, playable.</title>
-  <link rel="stylesheet" href="styles.css?b=20260901v2" />
+  <link rel="stylesheet" href="styles.css?b=20260901realism1" />
   <script>window.DRIVESG_CONFIG={backendBase:'https://drivesg-api.vercel.app'};</script>
 </head>
 <body>
@@ -21,14 +21,14 @@
       <div class="rotate-card">
         <div class="phone-icon" aria-hidden="true"><span></span></div>
         <strong>Rotate to landscape</strong>
-        <p>DriveSG is designed for two-thumb driving on iPhone.</p>
+        
       </div>
     </div>
 
     <header class="topbar">
       <button id="placesBtn" class="place-pill" type="button" aria-label="Open places and navigation">
         <span class="live-dot" id="mapDot"></span>
-        <span class="place-copy"><small id="placeEyebrow">DRIVING AROUND</small><strong id="locationName">Marina Bay</strong></span>
+        <span class="place-copy"><strong id="locationName">Marina Bay</strong><small id="placeEyebrow"></small></span>
         <span class="chevron">⌄</span>
       </button>
       <div id="weatherBadge" class="weather-badge" aria-live="polite"><span id="weatherIcon">◐</span><span id="weatherText">Singapore weather</span></div>
@@ -69,9 +69,9 @@
     <aside id="placesPanel" class="places-panel open" aria-label="Places and navigation">
       <div class="panel-head">
         <div>
-          <div class="eyebrow">DRIVESG NAVIGATION</div>
-          <h1 id="panelTitle">Where in Singapore?</h1>
-          <p id="panelIntro">Choose a destination, scenic drive, or starting area.</p>
+          
+          <h1 id="panelTitle">Where in Singapore?</h1><p id="panelIntro" class="ui-hidden-copy"></p>
+          
         </div>
         <button id="closePanelBtn" class="close-btn" type="button" aria-label="Close places">×</button>
       </div>
@@ -86,15 +86,15 @@
         <div class="experience-launch">
           <button id="discoverSingaporeBtn" class="experience-hero" type="button">
             <span class="experience-icon">✦</span>
-            <span><small>FIRST TIME IN SINGAPORE?</small><strong>Discover Singapore by road</strong><em>Guided scenic drives · local context · places to recognise</em></span>
+            <span><strong>Discover Singapore</strong><em>Scenic drives</em></span>
             <b>›</b>
           </button>
-          <button id="hopMapBtn" class="island-map-btn" type="button"><span>⌖</span><strong>Singapore map</strong><small>Tap anywhere to hop or navigate</small></button>
+          <button id="hopMapBtn" class="island-map-btn" type="button"><span>⌖</span><strong>Island map</strong></button>
         </div>
 
         <div class="quick-row">
-          <button id="nearMeBtn" class="quick-btn" type="button"><span>◎</span><strong>Use my location</strong></button>
-          <button id="randomBtn" class="quick-btn" type="button"><span>↝</span><strong id="randomBtnLabel">Random destination</strong></button>
+          <button id="nearMeBtn" class="quick-btn" type="button"><span>◎</span><strong>My location</strong></button>
+          <button id="randomBtn" class="quick-btn" type="button"><span>↝</span><strong id="randomBtnLabel">Surprise me</strong></button>
         </div>
 
         <form id="searchForm" class="search-row" role="search">
@@ -104,17 +104,17 @@
         <div id="searchMsg" class="search-msg" aria-live="polite"></div>
 
         <section id="recentSection" class="recent-section hidden">
-          <div class="section-label">RECENT DESTINATIONS</div>
+          <div class="section-label">RECENT</div>
           <div id="recentGrid" class="recent-grid"></div>
         </section>
 
-        <div class="section-label preset-label">POPULAR AREAS</div>
+        <div class="section-label preset-label">PLACES</div>
         <div id="presetGrid" class="preset-grid"></div>
       </div>
 
       <section id="challengeSection" class="challenge-section hidden" aria-label="Drive challenges">
         <div class="challenge-lead">
-          <span class="section-label">CURATED SINGAPORE DRIVES</span>
+          <span class="section-label">CHALLENGES</span>
           <strong id="challengeProgressLabel">0 completed</strong>
         </div>
         <div id="challengeGrid" class="challenge-grid"></div>
@@ -123,22 +123,21 @@
       <section id="discoverSection" class="discover-section hidden" aria-label="Discover Singapore">
         <div class="discover-panel-head">
           <button id="discoverBackBtn" class="discover-back" type="button">‹ Back</button>
-          <div><span class="section-label">DISCOVER SINGAPORE</span><strong>See Singapore by road</strong></div>
+          <div><strong>Discover</strong></div>
         </div>
         <div class="passport-card">
-          <div><span>SINGAPORE PASSPORT</span><strong id="passportProgress">0 / 0 places discovered</strong></div>
+          <div><span>PASSPORT</span><strong id="passportProgress">0 / 0</strong></div>
           <div class="passport-track"><i id="passportBar"></i></div>
         </div>
-        <p class="discover-intro">Relaxed scenic drives through Singapore’s different neighbourhoods, landmarks and road environments.</p>
+        
         <div id="guidedDriveGrid" class="guided-drive-grid"></div>
       </section>
 
       <div class="panel-foot">
-        <span class="status-dot"></span>
-        <span>Singapore, playable.</span>
+        
         <div class="panel-foot-actions">
-          <button id="creditsBtn" class="panel-share quiet" type="button">Credits</button>
-          <button id="shareBtn" class="panel-share" type="button">Share / Install</button>
+          <button id="creditsBtn" class="panel-share quiet icon-only" type="button" aria-label="Credits">ⓘ</button>
+          <button id="shareBtn" class="panel-share" type="button">Share</button>
         </div>
       </div>
     </aside>
@@ -182,15 +181,15 @@
     <section id="hopMapOverlay" class="hop-map-overlay" role="dialog" aria-modal="true" aria-labelledby="hopMapTitle">
       <div class="hop-map-shell">
         <header>
-          <div><span class="section-label">EXPLORE THE ISLAND</span><h2 id="hopMapTitle">Tap anywhere in Singapore</h2><p>Pick a place on the island, start there instantly or let DriveSG guide you across real Singapore roads.</p></div>
+          <div><h2 id="hopMapTitle">Singapore map</h2></div>
           <button id="hopMapCloseBtn" type="button" aria-label="Close Singapore map">×</button>
         </header>
         <div class="hop-map-canvas-wrap">
           <canvas id="hopMapCanvas" width="1200" height="700"></canvas>
-          <div class="hop-map-tip">Tap the island to choose a road area</div>
+          <div class="hop-map-tip">Tap to choose</div>
         </div>
         <div id="hopMapSelection" class="hop-map-selection">
-          <div><span>SELECTED AREA</span><strong id="hopMapPlaceName">Marina Bay</strong><small id="hopMapCoords">1.283, 103.859</small></div>
+          <div><strong id="hopMapPlaceName">Marina Bay</strong><small id="hopMapCoords">1.283, 103.859</small></div>
           <div class="hop-map-actions">
             <button id="hopNavigateBtn" type="button">Guide me here</button>
             <button id="hopStartBtn" class="primary" type="button">Drive from here</button>
@@ -250,7 +249,7 @@
       </div>
     </section>
 
-    <div id="driveHint" class="drive-hint">Slide to steer&nbsp;&nbsp;·&nbsp;&nbsp;GO to accelerate&nbsp;&nbsp;·&nbsp;&nbsp;Hold BRAKE at a stop to reverse</div>
+    <div id="driveHint" class="drive-hint">STEER · GO · BRAKE / REVERSE</div>
 
     <section id="mobileControls" class="drive-controls" aria-label="Driving controls">
       <div id="steerZone" class="steer-zone" aria-label="Steering pad">
@@ -272,34 +271,32 @@
     <div id="loader" class="loader-wrap">
       <div class="loader-card">
         <div class="loader-logo">SG</div>
-        <h2 id="loaderTitle">Building Singapore</h2>
+        <h2 id="loaderTitle">DriveSG</h2>
         <p id="loaderText">Preparing Marina Bay…</p>
         <div class="progress-track"><div id="progressBar" class="progress-bar"></div></div>
-        <div class="progress-meta"><span id="progressLabel">0%</span><span>Preparing the drive</span></div>
+        <div class="progress-meta"><span id="progressLabel">0%</span></div>
       </div>
     </div>
 
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
-    <button id="creditsChip" class="credits-chip" type="button" aria-label="Map and data credits">ⓘ</button>
+    <button id="creditsChip" class="credits-chip hidden-credit" type="button" aria-label="Credits">ⓘ</button>
     <span id="routingCredit" class="hidden-credit" aria-hidden="true"></span>
 
     <section id="creditsOverlay" class="credits-overlay" role="dialog" aria-modal="true" aria-labelledby="creditsTitle">
       <div class="credits-card">
         <button id="creditsCloseBtn" class="credits-close" type="button" aria-label="Close credits">×</button>
-        <span class="credits-kicker">DRIVESG CREDITS</span>
-        <h2 id="creditsTitle">Built from real Singapore map data</h2>
-        <p>DriveSG combines open mapping, Singapore basemap services, terrain and weather data to create its virtual driving world.</p>
+        <span class="credits-kicker">CREDITS</span>
+        <h2 id="creditsTitle">Data acknowledgements</h2>
         <div class="credits-links">
           <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap contributors</a>
           <a href="https://www.onemap.gov.sg/" target="_blank" rel="noopener">OneMap / Singapore Land Authority</a>
           <a href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo / Copernicus terrain</a>
         </div>
-        <small>These services provide map/data inputs. DriveSG is an independent driving experience.</small>
       </div>
     </section>
   </main>
 
-  <script src="boot.js?b=20260901v2"></script>
+  <script src="boot.js?b=20260901realism1"></script>
 </body>
 </html>
