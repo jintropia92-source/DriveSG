@@ -162,6 +162,11 @@ button { color: inherit; border: 0; -webkit-appearance: none; appearance: none; 
 .dyn.grip { min-width:29px; color:#a8deb9; border-color:rgba(168,222,185,.20); }
 .dyn.grip.wet { color:#9ed7ee; border-color:rgba(158,215,238,.27); background:rgba(110,186,222,.08); }
 .dyn.grip.warn { color:#ffb091; border-color:rgba(255,176,145,.28); background:rgba(255,132,99,.09); }
+.dyn.signal{min-width:28px}
+.dyn.signal.red{color:#ff8e87;border-color:rgba(255,110,104,.38);background:rgba(255,82,76,.10)}
+.dyn.signal.amber{color:#ffd36b;border-color:rgba(255,211,107,.38);background:rgba(255,190,76,.09)}
+.dyn.signal.green{color:#86e8ac;border-color:rgba(134,232,172,.32);background:rgba(80,205,128,.08)}
+
 .dyn.active { color:#11191b; background:#e9f4ee; border-color:transparent; box-shadow:0 0 0 1px rgba(255,255,255,.08); }
 .hud-meta { min-width: 0; margin-left: 8px; padding-left: 9px; border-left: 1px solid var(--line); }
 .hud-meta strong { display:block; max-width: 165px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-size:9px; line-height:1.15; letter-spacing:-.01em; }
@@ -476,7 +481,7 @@ body.panel-open .minimap-card, body.panel-open .nav-banner { opacity:.08; pointe
 .result-hero strong{display:block;margin-top:4px;font-size:24px;font-variant-numeric:tabular-nums;letter-spacing:-.055em}
 .result-hero small{display:block;margin-top:3px;color:#aee8c0;font-size:7px;font-weight:800}
 .result-score{text-align:right}.result-score strong{font-size:31px}.result-score small{font-size:11px}
-.result-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;margin-top:8px}
+.result-stats{display:grid;grid-template-columns:repeat(4,1fr);gap:7px;margin-top:8px}
 .result-stats>div{padding:9px;border:1px solid var(--line);border-radius:13px;background:rgba(255,255,255,.035)}
 .result-stats b{display:block;margin-top:4px;font-size:12px;font-variant-numeric:tabular-nums}
 .challenge-result-card p{min-height:14px;margin:9px 1px 0;color:rgba(255,255,255,.55);font-size:8px;line-height:1.35}

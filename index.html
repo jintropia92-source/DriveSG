@@ -10,7 +10,7 @@
   <meta name="format-detection" content="telephone=no" />
   <meta name="color-scheme" content="dark" />
   <title>DriveSG — Singapore, playable.</title>
-  <link rel="stylesheet" href="styles.css?b=20260901drive1" />
+  <link rel="stylesheet" href="styles.css?b=20260901traffic1" />
   <script>window.DRIVESG_CONFIG={backendBase:'https://drivesg-api.vercel.app'};</script>
 </head>
 <body>
@@ -136,6 +136,7 @@
           <div><span>COLLISIONS</span><b id="challengeCollisions">0</b></div>
           <div><span>OFF ROAD</span><b id="challengeOffroad">0.0s</b></div>
           <div><span>SPEEDING</span><b id="challengeSpeeding">0.0s</b></div>
+          <div><span>RED LIGHTS</span><b id="challengeRedLights">0</b></div>
         </div>
         <p id="challengeResultNote">Clean drive.</p>
         <div class="result-actions">
@@ -152,6 +153,7 @@
         <span id="gripIndicator" class="dyn grip">GRIP</span>
         <span id="absIndicator" class="dyn">ABS</span>
         <span id="tcsIndicator" class="dyn">TCS</span>
+        <span id="signalIndicator" class="dyn signal hidden">SIG</span>
       </div>
       <div id="speedLimit" class="speed-limit hidden" aria-label="Speed limit">50</div>
       <div class="hud-meta">
@@ -195,6 +197,6 @@
     <footer class="attribution"><a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">© OpenStreetMap</a><span id="routingCredit"></span></footer>
   </main>
 
-  <script src="boot.js?b=20260901drive1"></script>
+  <script src="boot.js?b=20260901traffic1"></script>
 </body>
 </html>

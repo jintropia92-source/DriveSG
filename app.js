@@ -78,7 +78,11 @@
   const MAX_TRAFFIC_SIGNALS = 140;
   const MAX_CROSSINGS = 140;
   const MAX_BUS_STOPS = 90;
-  const MAX_AMBIENT_TRAFFIC = 18;
+  const MAX_AMBIENT_TRAFFIC = 26;
+  const TRAFFIC_SIGNAL_CYCLE_SECONDS = 32;
+  const TRAFFIC_LANE_CHANGE_SECONDS = 1.05;
+  const TRAFFIC_MIN_GAP_METERS = 4.6;
+  const TRAFFIC_BUS_DWELL_SECONDS = 4.5;
   const MINI_MAP_RANGE_DEFAULT = 360;
 
   let scene, camera, renderer, clock, sun, sunTarget, horizonHaze, hemi;
@@ -125,6 +129,10 @@
   let trafficMaterial = null;
   let roadGraph = new Map();
   let trafficSignalsWorld = [];
+  let busStopsWorld = [];
+  let trafficSignalVisuals = null;
+  let lastSignalVisualUpdate = -Infinity;
+  let userSignalTracker = { key:'', distance:Infinity, violatedAt:-Infinity };
   let carRoadY = 0;
   let carHeadlight = null;
   let carHeadlightTarget = null;
@@ -209,6 +217,7 @@
     gripIndicator: document.getElementById('gripIndicator'),
     absIndicator: document.getElementById('absIndicator'),
     tcsIndicator: document.getElementById('tcsIndicator'),
+    signalIndicator: document.getElementById('signalIndicator'),
     surfaceState: document.getElementById('surfaceState'),
     roadName: document.getElementById('roadName'),
     tripDistance: document.getElementById('tripDistance'),
@@ -244,6 +253,7 @@
     challengeCollisions: document.getElementById('challengeCollisions'),
     challengeOffroad: document.getElementById('challengeOffroad'),
     challengeSpeeding: document.getElementById('challengeSpeeding'),
+    challengeRedLights: document.getElementById('challengeRedLights'),
     challengeResultNote: document.getElementById('challengeResultNote'),
     challengeDoneBtn: document.getElementById('challengeDoneBtn'),
     challengeAgainBtn: document.getElementById('challengeAgainBtn'),
@@ -1070,7 +1080,7 @@
   }
 
   function makeEmptyChallenge() {
-    return { active:false, phase:'idle', id:'', def:null, startedAt:0, countdownEnds:0, elapsedS:0, offRoadS:0, speedingS:0, speedingPenalty:0, collisions:0, score:100, lastCollisionAt:-Infinity, newBest:false };
+    return { active:false, phase:'idle', id:'', def:null, startedAt:0, countdownEnds:0, elapsedS:0, offRoadS:0, speedingS:0, speedingPenalty:0, collisions:0, redLights:0, score:100, lastCollisionAt:-Infinity, newBest:false };
   }
 
   function readChallengeBests(){
@@ -1154,7 +1164,7 @@
       challenge.speedingS+=dt;
       challenge.speedingPenalty+=dt*.34*Math.min(2.4,1+(kmh-lastSpeedLimit-6)/28);
     }
-    challenge.score=Math.max(0,Math.round(100-challenge.collisions*12-challenge.offRoadS*1.25-challenge.speedingPenalty));
+    challenge.score=Math.max(0,Math.round(100-challenge.collisions*12-challenge.redLights*10-challenge.offRoadS*1.25-challenge.speedingPenalty));
     if(els.challengeTimer)els.challengeTimer.textContent=formatChallengeTime(challenge.elapsedS);
     if(els.challengeScore)els.challengeScore.textContent=String(challenge.score);
   }
@@ -1163,6 +1173,12 @@
     if(!challenge.active||challenge.phase!=='running'||elapsed-challenge.lastCollisionAt<.85)return;
     challenge.lastCollisionAt=elapsed;challenge.collisions++;
     if(challenge.collisions<=3)showToast(`Collision · drive score -12`);
+  }
+
+  function recordRedLightViolation(elapsed){
+    if(challenge.active&&challenge.phase==='running'){challenge.redLights++;showToast('Red light · drive score -10');}
+    else showToast('Red light');
+    userSignalTracker.violatedAt=elapsed;
   }
 
   function finishChallenge(){
@@ -1182,10 +1198,12 @@
     if(els.challengeCollisions)els.challengeCollisions.textContent=String(challenge.collisions);
     if(els.challengeOffroad)els.challengeOffroad.textContent=`${challenge.offRoadS.toFixed(1)}s`;
     if(els.challengeSpeeding)els.challengeSpeeding.textContent=`${challenge.speedingS.toFixed(1)}s`;
+    if(els.challengeRedLights)els.challengeRedLights.textContent=String(challenge.redLights||0);
     const notes=[];
     if(challenge.newBest)notes.push('New personal best.');
     if(challenge.score>=96)notes.push('Exceptional control — almost spotless.');
     else if(challenge.collisions)notes.push(`${challenge.collisions} collision${challenge.collisions===1?'':'s'} cost ${challenge.collisions*12} score.`);
+    else if(challenge.redLights)notes.push(`${challenge.redLights} red-light violation${challenge.redLights===1?'':'s'} cost ${challenge.redLights*10} score.`);
     else if(challenge.offRoadS>2)notes.push('Keep the car on the road to protect your score.');
     else if(challenge.speedingS>5)notes.push('A little less speeding would lift the drive score.');
     else notes.push('Clean, controlled drive.');
@@ -1281,8 +1299,11 @@
       ctx.strokeStyle=seg.tunnel?'#586267':(seg.bridge?'#c4ccc8':(seg.major?'#a0aaa8':'#7d8988'));ctx.lineWidth=Math.max(1.2,Math.min(5.5,seg.width*scale*.82));ctx.stroke();
     }
 
-    const signalPhase=trafficSignalPhase(elapsed),signalColor=signalPhase==='red'?'#ff776f':(signalPhase==='amber'?'#ffd36b':'#75e696');
-    for(const sig of trafficSignalsWorld){if(!near(sig.x,sig.z))continue;const q=toScreen(sig.x,sig.z);ctx.beginPath();ctx.arc(q.x,q.y,2.3,0,Math.PI*2);ctx.fillStyle=signalColor;ctx.fill();}
+    for(const sig of trafficSignalsWorld){
+      if(!near(sig.x,sig.z))continue;
+      const phase=trafficSignalPhaseFor(sig,elapsed),signalColor=phase==='red'?'#ff776f':(phase==='amber'?'#ffd36b':'#75e696');
+      const q=toScreen(sig.x,sig.z);ctx.beginPath();ctx.arc(q.x,q.y,2.3,0,Math.PI*2);ctx.fillStyle=signalColor;ctx.fill();
+    }
     for(const incident of liveTrafficIncidents){
       const p=project(Number(incident.latitude),Number(incident.longitude));if(!near(p.x,p.z))continue;const q=toScreen(p.x,p.z);
       ctx.beginPath();ctx.arc(q.x,q.y,4.2,0,Math.PI*2);ctx.fillStyle='#ff6b5f';ctx.fill();ctx.strokeStyle='#531d18';ctx.lineWidth=1.4;ctx.stroke();
@@ -1364,21 +1385,103 @@
     return .94;
   }
 
+  function trafficVehicleType(seed){
+    const r=pseudoRandom(seed*91+17);
+    if(r>.93)return 'bus';
+    if(r>.83)return 'taxi';
+    if(r>.72)return 'van';
+    if(r>.67)return 'lorry';
+    return 'car';
+  }
+
+  function trafficVehicleSpec(type){
+    if(type==='bus')return {sx:1.10,sy:1.68,sz:2.05,y:.72,radius:3.3,accel:.74,brake:.86,speed:.82};
+    if(type==='lorry')return {sx:1.14,sy:1.42,sz:1.55,y:.58,radius:2.8,accel:.70,brake:.82,speed:.78};
+    if(type==='van')return {sx:1.05,sy:1.28,sz:1.28,y:.51,radius:2.45,accel:.86,brake:.92,speed:.90};
+    if(type==='taxi')return {sx:1.01,sy:1.03,sz:1.02,y:.44,radius:2.25,accel:1.00,brake:1.00,speed:.96};
+    return {sx:1,sy:1,sz:1,y:.43,radius:2.2,accel:1,brake:1,speed:1};
+  }
+
+  function trafficRoadIsOneWay(seg){
+    const one=String(seg.oneway||'').toLowerCase();
+    return one==='yes'||one==='1'||one==='true'||one==='-1';
+  }
+
+  function trafficDirectionalLaneCount(seg,dir){
+    if(trafficRoadIsOneWay(seg))return Math.max(1,Number(seg.lanes)||1);
+    const tagged=dir>0?Number(seg.lanesForward):Number(seg.lanesBackward);
+    if(Number.isFinite(tagged)&&tagged>0)return Math.max(1,Math.round(tagged));
+    return Math.max(1,Math.floor((Number(seg.lanes)||2)/2));
+  }
+
+  function trafficLaneOffset(seg,dir,laneFloat=0){
+    const laneCount=trafficDirectionalLaneCount(seg,dir);
+    const carriageway=trafficRoadIsOneWay(seg)?seg.width:seg.width/2;
+    const laneWidth=Math.min(3.55,Math.max(2.45,carriageway/laneCount));
+    const clamped=THREE.MathUtils.clamp(laneFloat,0,Math.max(0,laneCount-1));
+    // Lane 0 is the left-most lane in the direction of travel, matching Singapore keep-left traffic.
+    const offset=(seg.width/2-laneWidth*(clamped+.5))*dir;
+    return THREE.MathUtils.clamp(offset,-Math.max(.8,seg.width*.46),Math.max(.8,seg.width*.46));
+  }
+
+  function trafficTurnLaneSpec(seg,dir){
+    if(dir>0&&seg.turnLanesForward)return seg.turnLanesForward;
+    if(dir<0&&seg.turnLanesBackward)return seg.turnLanesBackward;
+    if(trafficRoadIsOneWay(seg)&&seg.turnLanes)return seg.turnLanes;
+    return '';
+  }
+
+  function trafficPreferredLaneForTurn(seg,dir,turn='straight'){
+    const count=trafficDirectionalLaneCount(seg,dir);
+    if(count<=1)return 0;
+    const raw=trafficTurnLaneSpec(seg,dir);
+    if(raw){
+      const lanes=raw.split('|').map(v=>v.toLowerCase().split(';').map(x=>x.trim()));
+      const wanted=turn==='left'?['left','slight_left']:turn==='right'?['right','slight_right']:['through','straight','none'];
+      const matches=[];
+      lanes.forEach((vals,i)=>{if(vals.some(v=>wanted.includes(v)))matches.push(i);});
+      if(matches.length)return THREE.MathUtils.clamp(turn==='right'?matches[matches.length-1]:matches[0],0,count-1);
+    }
+    if(turn==='left')return 0;
+    if(turn==='right')return count-1;
+    return 0;
+  }
+
+  function trafficTurnClass(seg,dir,nextSeg,nextDir){
+    if(!seg||!nextSeg)return 'straight';
+    const ax=(seg.bx-seg.ax)*dir,az=(seg.bz-seg.az)*dir,al=Math.hypot(ax,az)||1;
+    const bx=(nextSeg.bx-nextSeg.ax)*nextDir,bz=(nextSeg.bz-nextSeg.az)*nextDir,bl=Math.hypot(bx,bz)||1;
+    const dot=THREE.MathUtils.clamp((ax*bx+az*bz)/(al*bl),-1,1);
+    const cross=(ax*bz-az*bx)/(al*bl);
+    const angle=Math.acos(dot)*180/Math.PI;
+    if(angle<28)return 'straight';
+    if(angle>150)return 'uturn';
+    // In DriveSG's x/east, z/south coordinate plane, positive cross is a right turn.
+    return cross>0?'right':'left';
+  }
+
   function createAmbientTraffic(group,segments,graph=roadGraph) {
     ambientTraffic=[];trafficMesh=null;
     const eligible=segments.filter(s=>Math.hypot(s.bx-s.ax,s.bz-s.az)>22&&!/service|living_street/.test(s.type||''));
     if(!eligible.length||!group)return;
-    const count=Math.min(MAX_AMBIENT_TRAFFIC,Math.max(5,Math.floor(Math.max(9,eligible.length/22)*trafficDensityForTime())));
+    const count=Math.min(MAX_AMBIENT_TRAFFIC,Math.max(7,Math.floor(Math.max(11,eligible.length/18)*trafficDensityForTime())));
     const geo=new THREE.BoxGeometry(1.68,.68,3.65);
     trafficMesh=new THREE.InstancedMesh(geo,trafficMaterial,count);
     trafficMesh.castShadow=false;trafficMesh.receiveShadow=false;
-    const palette=[0x263238,0xd6d9d6,0x7d292c,0x244a62,0xb7a56b,0xeeeeea,0x7b8790];
+    const palette=[0x263238,0xd6d9d6,0x7d292c,0x244a62,0xb7a56b,0xeeeeea,0x7b8790,0x1e6a4b];
     for(let i=0;i<count;i++){
       const seg=eligible[Math.floor(pseudoRandom(i*41+13)*eligible.length)];
       const dirs=[1,-1].filter(d=>trafficCanTraverse(seg,d)),dir=dirs[Math.floor(pseudoRandom(i*17+4)*dirs.length)]||1;
-      const type=pseudoRandom(i*71+9)>.86?'bus':'car';
-      ambientTraffic.push({seg,t:dir>0?pseudoRandom(i*23+7):1-pseudoRandom(i*23+7),dir,type,cruise:trafficCruiseFor(seg,i),speed:0,x:0,z:0,y:seg.y||0});
-      trafficMesh.setColorAt(i,new THREE.Color(type==='bus'?0xe7e4db:palette[i%palette.length]));
+      const type=trafficVehicleType(i+1),laneCount=trafficDirectionalLaneCount(seg,dir);
+      const laneIndex=Math.min(laneCount-1,Math.floor(pseudoRandom(i*37+12)*Math.min(laneCount,2)));
+      ambientTraffic.push({
+        seg,t:dir>0?pseudoRandom(i*23+7):1-pseudoRandom(i*23+7),dir,type,
+        cruise:trafficCruiseFor(seg,i)*trafficVehicleSpec(type).speed,speed:0,x:0,z:0,y:seg.y||0,
+        laneIndex,laneFloat:laneIndex,targetLane:laneIndex,laneCooldown:pseudoRandom(i*19+2)*2,
+        nextLeg:null,nextTurn:'straight',dwellUntil:0,lastBusStopId:null,returnLaneTimer:0,visualYaw:null,turnBlend:null
+      });
+      const color=type==='bus'?0xe7e4db:type==='taxi'?(i%2?0x2e68a6:0xd44b47):type==='lorry'?0xb8b6a8:type==='van'?0xe1e2df:palette[i%palette.length];
+      trafficMesh.setColorAt(i,new THREE.Color(color));
     }
     trafficMesh.instanceColor.needsUpdate=true;group.add(trafficMesh);updateAmbientTraffic(0,0);
   }
@@ -1400,61 +1503,260 @@
     let best=null,bestScore=-Infinity;
     candidates.forEach((e,idx)=>{
       const ndx=(e.seg.bx-e.seg.ax)*e.dir,ndz=(e.seg.bz-e.seg.az)*e.dir,nl=Math.hypot(ndx,ndz)||1,dot=(cux*ndx+cuz*ndz)/nl;
-      const score=dot*1.35+(e.seg.major===seg.major?0.18:0)+pseudoRandom((e.seg.ax+e.seg.az+idx*17)*3)*.72;
-      if(score>bestScore){bestScore=score;best=e;}
+      const turn=trafficTurnClass(seg,agent.dir,e.seg,e.dir);
+      const uturnPenalty=turn==='uturn'?-4:0;
+      const classContinuity=e.seg.major===seg.major?.25:0;
+      const roadNameContinuity=seg.name&&e.seg.name===seg.name?.34:0;
+      const score=dot*1.50+classContinuity+roadNameContinuity+uturnPenalty+pseudoRandom((e.seg.ax+e.seg.az+idx*17)*3)*.54;
+      if(score>bestScore){bestScore=score;best={...e,turn};}
     });
     return best;
+  }
+
+  function prepareNextTrafficLeg(agent){
+    if(agent.nextLeg)return agent.nextLeg;
+    const next=chooseNextTrafficLeg(agent);
+    if(next){agent.nextLeg=next;agent.nextTurn=next.turn||'straight';}
+    return next;
   }
 
   function respawnTrafficAgent(agent,index){
     const eligible=roadSegments.filter(s=>Math.hypot(s.bx-s.ax,s.bz-s.az)>24&&!/service|living_street/.test(s.type||''));if(!eligible.length)return;
     const seg=eligible[Math.floor(pseudoRandom((clock?.elapsedTime||0)*13+index*47+5)*eligible.length)],dirs=[1,-1].filter(d=>trafficCanTraverse(seg,d));
-    agent.seg=seg;agent.dir=dirs[Math.floor(pseudoRandom(index*23+9)*dirs.length)]||1;agent.t=agent.dir>0?0:1;agent.cruise=trafficCruiseFor(seg,index+31);agent.speed=agent.cruise*.55;
+    const dir=dirs[Math.floor(pseudoRandom(index*23+9)*dirs.length)]||1,laneCount=trafficDirectionalLaneCount(seg,dir);
+    agent.seg=seg;agent.dir=dir;agent.t=dir>0?0:1;agent.cruise=trafficCruiseFor(seg,index+31)*trafficVehicleSpec(agent.type).speed;agent.speed=agent.cruise*.55;
+    agent.laneIndex=0;agent.targetLane=0;agent.laneFloat=0;agent.laneCooldown=1.2;agent.nextLeg=null;agent.nextTurn='straight';agent.dwellUntil=0;agent.lastBusStopId=null;agent.visualYaw=null;agent.turnBlend=null;
   }
 
-  function trafficSignalPhase(elapsed){const t=((elapsed||0)%22+22)%22;return t<8?'red':(t<19?'green':'amber');}
-  function trafficSignalIsRed(elapsed){return trafficSignalPhase(elapsed)==='red';}
+  function trafficSignalPhase(elapsed){return trafficSignalPhaseFor(null,elapsed);}
 
-  function signalDistanceAhead(agent){
-    const list=agent.seg.signals||[];if(!list.length)return Infinity;
-    const len=Math.hypot(agent.seg.bx-agent.seg.ax,agent.seg.bz-agent.seg.az)||1;let best=Infinity;
-    for(const s of list){const dt=(s.t-agent.t)*agent.dir;if(dt>0)best=Math.min(best,dt*len);}
+  function trafficSignalPhaseFor(signal,elapsed){
+    const group=signal?.phaseGroup||0,offset=signal?.phaseOffset||0;
+    const t=((elapsed+offset)%TRAFFIC_SIGNAL_CYCLE_SECONDS+TRAFFIC_SIGNAL_CYCLE_SECONDS)%TRAFFIC_SIGNAL_CYCLE_SECONDS;
+    if(group===0){
+      if(t<12)return 'green';
+      if(t<15)return 'amber';
+      return 'red';
+    }
+    if(t>=16&&t<28)return 'green';
+    if(t>=28&&t<31)return 'amber';
+    return 'red';
+  }
+
+  function trafficSignalIsRed(elapsed,signal=null){return trafficSignalPhaseFor(signal,elapsed)==='red';}
+
+  function signalAheadInfo(agent){
+    const list=agent.seg.signals||[];if(!list.length)return null;
+    const len=Math.hypot(agent.seg.bx-agent.seg.ax,agent.seg.bz-agent.seg.az)||1;let best=null;
+    for(const signal of list){
+      const dt=(signal.t-agent.t)*agent.dir;
+      if(dt<=0)continue;
+      const distance=dt*len;
+      if(!best||distance<best.distance)best={signal,distance};
+    }
     return best;
+  }
+
+  function busStopAheadInfo(agent){
+    if(agent.type!=='bus')return null;
+    const list=agent.seg.busStops||[];if(!list.length)return null;
+    const len=Math.hypot(agent.seg.bx-agent.seg.ax,agent.seg.bz-agent.seg.az)||1;let best=null;
+    for(const stop of list){
+      if(stop.id===agent.lastBusStopId)continue;
+      const dt=(stop.t-agent.t)*agent.dir;if(dt<=0)continue;
+      const distance=dt*len;if(!best||distance<best.distance)best={stop,distance};
+    }
+    return best;
+  }
+
+  function trafficDownstreamGap(agent){
+    const next=agent.nextLeg;if(!next)return Infinity;
+    const seg=next.seg,len=Math.hypot(seg.bx-seg.ax,seg.bz-seg.az)||1,entryT=next.dir>0?0:1;let best=Infinity;
+    for(const other of ambientTraffic){
+      if(other===agent||other.seg!==seg||other.dir!==next.dir)continue;
+      const distance=(other.t-entryT)*next.dir*len;
+      if(distance>=0)best=Math.min(best,distance);
+    }
+    return best;
+  }
+
+  function trafficLeaderInLane(agent,laneIndex){
+    const seg=agent.seg,len=Math.hypot(seg.bx-seg.ax,seg.bz-seg.az)||1;let best=null;
+    for(const other of ambientTraffic){
+      if(other===agent||other.seg!==seg||other.dir!==agent.dir)continue;
+      if(Math.abs((other.laneFloat??other.laneIndex??0)-laneIndex)>.48)continue;
+      const distance=(other.t-agent.t)*agent.dir*len;
+      if(distance>0&&(!best||distance<best.distance))best={agent:other,distance};
+    }
+    return best;
+  }
+
+  function trafficLaneClear(agent,laneIndex){
+    const seg=agent.seg,len=Math.hypot(seg.bx-seg.ax,seg.bz-seg.az)||1;
+    for(const other of ambientTraffic){
+      if(other===agent||other.seg!==seg||other.dir!==agent.dir)continue;
+      if(Math.abs((other.laneFloat??other.laneIndex??0)-laneIndex)>.52)continue;
+      const distance=(other.t-agent.t)*agent.dir*len;
+      if(distance>-9&&distance<16)return false;
+    }
+    return true;
+  }
+
+  function updateTrafficLaneIntent(agent,dt,distanceToExit){
+    const laneCount=trafficDirectionalLaneCount(agent.seg,agent.dir);
+    agent.laneCooldown=Math.max(0,(agent.laneCooldown||0)-dt);
+    if(laneCount<=1){agent.targetLane=0;agent.laneIndex=0;return;}
+
+    const next=distanceToExit<62?prepareNextTrafficLeg(agent):agent.nextLeg;
+    if(next&&distanceToExit<50&&agent.nextTurn!=='straight'){
+      const preferred=trafficPreferredLaneForTurn(agent.seg,agent.dir,agent.nextTurn);
+      if(trafficLaneClear(agent,preferred)||distanceToExit<24){agent.targetLane=preferred;agent.laneIndex=preferred;}
+      return;
+    }
+
+    const leader=trafficLeaderInLane(agent,agent.laneIndex||0);
+    if(agent.laneCooldown<=0&&leader&&leader.distance<17&&leader.agent.speed<agent.speed*.90){
+      // Singapore keeps left; overtaking moves right, then returns left when clear.
+      const overtake=Math.min(laneCount-1,(agent.laneIndex||0)+1);
+      if(overtake!==agent.laneIndex&&trafficLaneClear(agent,overtake)){
+        agent.targetLane=overtake;agent.laneIndex=overtake;agent.laneCooldown=2.4;agent.returnLaneTimer=1.4;return;
+      }
+    }
+
+    if((agent.laneIndex||0)>0){
+      agent.returnLaneTimer=Math.max(0,(agent.returnLaneTimer||0)-dt);
+      if(agent.returnLaneTimer<=0&&agent.laneCooldown<=0){
+        const left=(agent.laneIndex||0)-1;
+        if(trafficLaneClear(agent,left)){agent.targetLane=left;agent.laneIndex=left;agent.laneCooldown=2.0;}
+      }
+    }
+  }
+
+  function trafficTurnSpeed(agent){
+    if(agent.nextTurn==='uturn')return 4.5;
+    if(agent.nextTurn==='left'||agent.nextTurn==='right')return /motorway|trunk/.test(agent.seg.type||'')?9.5:7.3;
+    return Infinity;
+  }
+
+  function lerpAngleRadians(a,b,t){
+    let d=(b-a+Math.PI)%(Math.PI*2)-Math.PI;
+    if(d<-Math.PI)d+=Math.PI*2;
+    return a+d*t;
   }
 
   function updateAmbientTraffic(dt,elapsed=clock?.elapsedTime||0) {
     if(!trafficMesh||!ambientTraffic.length)return;
-    const red=trafficSignalIsRed(elapsed),m=new THREE.Matrix4(),pos=new THREE.Vector3(),quat=new THREE.Quaternion(),scale=new THREE.Vector3();
+    const m=new THREE.Matrix4(),pos=new THREE.Vector3(),quat=new THREE.Quaternion(),scale=new THREE.Vector3();
+    const carX=car?.position.x,carZ=car?.position.z;
     ambientTraffic.forEach((a,i)=>{
       let seg=a.seg,dx=seg.bx-seg.ax,dz=seg.bz-seg.az,len=Math.hypot(dx,dz)||1;
+      const spec=trafficVehicleSpec(a.type);
+      const distanceToExit=(a.dir>0?1-a.t:a.t)*len;
+      if(distanceToExit<62)prepareNextTrafficLeg(a);
+      updateTrafficLaneIntent(a,dt,distanceToExit);
+      a.laneFloat+=(a.targetLane-a.laneFloat)*Math.min(1,dt*(1/TRAFFIC_LANE_CHANGE_SECONDS)*3.2);
+
       let target=a.cruise*trafficSpeedFactorForTime()*(1-wetness*.16);
-      const sigDist=red?signalDistanceAhead(a):Infinity;
-      if(sigDist<16)target=Math.min(target,Math.max(0,(sigDist-3.2)*.72));
-      for(const other of ambientTraffic){
-        if(other===a||other.seg!==seg||other.dir!==a.dir)continue;
-        const ahead=(other.t-a.t)*a.dir*len;if(ahead>0&&ahead<13){target=Math.min(target,Math.max(0,(ahead-4)*.85));break;}
+      if(a.nextLeg&&distanceToExit<32)target=Math.min(target,trafficTurnSpeed(a));
+      if(a.nextLeg&&distanceToExit<20){
+        const downstreamGap=trafficDownstreamGap(a);
+        if(downstreamGap<8.5)target=Math.min(target,Math.max(0,(distanceToExit-3.5)*.62));
       }
-      a.speed+=(target-a.speed)*Math.min(1,dt*(target<a.speed?3.8:1.3));
-      if(dt>0)a.t+=a.dir*(a.speed/len)*dt;
+
+      const signalInfo=signalAheadInfo(a);
+      if(signalInfo){
+        const phase=trafficSignalPhaseFor(signalInfo.signal,elapsed);
+        const stopForSignal=phase==='red'||(phase==='amber'&&signalInfo.distance<Math.max(8,a.speed*a.speed/10));
+        if(stopForSignal&&signalInfo.distance<30)target=Math.min(target,Math.max(0,(signalInfo.distance-3.3)*.68));
+      }
+
+      const busStop=busStopAheadInfo(a);
+      if(a.dwellUntil>elapsed){target=0;}
+      else if(busStop&&busStop.distance<25){
+        target=Math.min(target,Math.max(0,(busStop.distance-2.2)*.60));
+        if(busStop.distance<2.8&&a.speed<1.35){a.dwellUntil=elapsed+TRAFFIC_BUS_DWELL_SECONDS;a.lastBusStopId=busStop.stop.id;target=0;}
+      }
+
+      const leader=trafficLeaderInLane(a,a.laneIndex||0);
+      if(leader&&leader.distance<20){
+        const safe=TRAFFIC_MIN_GAP_METERS+Math.min(7,a.speed*.34);
+        target=Math.min(target,Math.max(0,(leader.distance-safe)*.76+leader.agent.speed*.72));
+      }
+
+      // Treat the player's car as another road user instead of letting ambient traffic ghost through it.
+      if(Number.isFinite(carX)&&Number.isFinite(carZ)){
+        const ux=dx/len*a.dir,uz=dz/len*a.dir,tx=carX-a.x,tz=carZ-a.z;
+        const ahead=tx*ux+tz*uz,lateral=Math.abs(tx*(-uz)+tz*ux);
+        if(ahead>0&&ahead<17&&lateral<3.2)target=Math.min(target,Math.max(0,(ahead-5.0)*.72));
+      }
+
+      const accelRate=1.35*spec.accel,brakeRate=4.4*spec.brake;
+      a.speed+=(target-a.speed)*Math.min(1,dt*(target<a.speed?brakeRate:accelRate));
+      if(dt>0&&a.dwellUntil<=elapsed)a.t+=a.dir*(a.speed/len)*dt;
+
       if(a.t>1||a.t<0){
-        const next=chooseNextTrafficLeg(a);
-        if(next){a.seg=seg=next.seg;a.dir=next.dir;a.t=a.dir>0?0:1;a.cruise=trafficCruiseFor(seg,i+Math.floor(elapsed));}
-        else{respawnTrafficAgent(a,i);seg=a.seg;}
+        const previousPose={x:a.x,z:a.z,y:a.y,yaw:a.visualYaw};
+        const next=a.nextLeg||chooseNextTrafficLeg(a);
+        if(next){
+          a.seg=seg=next.seg;a.dir=next.dir;a.t=a.dir>0?0:1;a.nextLeg=null;a.nextTurn='straight';
+          const newCount=trafficDirectionalLaneCount(seg,a.dir);a.laneIndex=Math.min(a.laneIndex||0,newCount-1);a.targetLane=a.laneIndex;a.laneFloat=Math.min(a.laneFloat,newCount-1);
+          a.cruise=trafficCruiseFor(seg,i+Math.floor(elapsed))*spec.speed;
+          if(Number.isFinite(previousPose.x)&&Number.isFinite(previousPose.z))a.turnBlend={...previousPose,startedAt:elapsed,duration:.52};
+        }else{respawnTrafficAgent(a,i);seg=a.seg;}
         dx=seg.bx-seg.ax;dz=seg.bz-seg.az;len=Math.hypot(dx,dz)||1;
       }
-      const ux=dx/len,uz=dz/len,nx=-uz,nz=ux;
-      const laneOffset=Math.min(2.45,Math.max(.78,seg.width*Math.min(.24,.45/Math.max(1,seg.lanes))))*a.dir;
-      a.x=seg.ax+dx*a.t+nx*laneOffset;a.z=seg.az+dz*a.t+nz*laneOffset;a.y=segmentYAt(seg,a.t);
+
+      const ux=dx/len,uz=dz/len,nx=-uz,nz=ux,laneOffset=trafficLaneOffset(seg,a.dir,a.laneFloat||0);
+      const desiredX=seg.ax+dx*a.t+nx*laneOffset,desiredZ=seg.az+dz*a.t+nz*laneOffset,desiredY=segmentYAt(seg,a.t);
+      if(a.turnBlend){
+        const u=THREE.MathUtils.clamp((elapsed-a.turnBlend.startedAt)/a.turnBlend.duration,0,1),smooth=u*u*(3-2*u);
+        a.x=THREE.MathUtils.lerp(a.turnBlend.x,desiredX,smooth);a.z=THREE.MathUtils.lerp(a.turnBlend.z,desiredZ,smooth);a.y=THREE.MathUtils.lerp(a.turnBlend.y||0,desiredY,smooth);
+        if(u>=1)a.turnBlend=null;
+      }else{a.x=desiredX;a.z=desiredZ;a.y=desiredY;}
       const yaw=Math.atan2(dx*a.dir,dz*a.dir);
-      pos.set(a.x,a.y+(a.type==='bus'?.70:.43),a.z);quat.setFromAxisAngle(new THREE.Vector3(0,1,0),yaw);
-      scale.set(a.type==='bus'?1.08:1,a.type==='bus'?1.65:1,a.type==='bus'?1.75:1);m.compose(pos,quat,scale);trafficMesh.setMatrixAt(i,m);
+      a.visualYaw=Number.isFinite(a.visualYaw)?lerpAngleRadians(a.visualYaw,yaw,Math.min(1,dt*6.5)):yaw;
+      pos.set(a.x,a.y+spec.y,a.z);quat.setFromAxisAngle(new THREE.Vector3(0,1,0),a.visualYaw);
+      scale.set(spec.sx,spec.sy,spec.sz);m.compose(pos,quat,scale);trafficMesh.setMatrixAt(i,m);
     });
     trafficMesh.instanceMatrix.needsUpdate=true;
   }
 
   function carHitsTraffic(x,z,y=carRoadY) {
-    for(const a of ambientTraffic)if(Math.abs((a.y||0)-y)<1.8&&Math.hypot(x-a.x,z-a.z)<2.25)return true;
+    for(const a of ambientTraffic){
+      const spec=trafficVehicleSpec(a.type);
+      if(Math.abs((a.y||0)-y)<1.9&&Math.hypot(x-a.x,z-a.z)<spec.radius)return true;
+    }
     return false;
+  }
+
+
+  function updateUserTrafficRuleState(elapsed,roadHit){
+    const hideSignal=()=>{if(els.signalIndicator){els.signalIndicator.className='dyn signal hidden';els.signalIndicator.textContent='SIG';}};
+    if(!roadHit||!roadHit.seg||roadHit.dist>roadHit.seg.width/2+4||!roadHit.seg.signals?.length){
+      userSignalTracker.key='';userSignalTracker.distance=Infinity;hideSignal();return;
+    }
+    const seg=roadHit.seg,dx=seg.bx-seg.ax,dz=seg.bz-seg.az,len=Math.hypot(dx,dz)||1;
+    const fx=Math.sin(car.rotation.y),fz=Math.cos(car.rotation.y),dir=(fx*dx+fz*dz)>=0?1:-1;
+    let nearest=null;
+    for(const signal of seg.signals){
+      const distance=(signal.t-roadHit.t)*dir*len;
+      if(distance < -8 || distance > 70)continue;
+      if(!nearest||Math.abs(distance)<Math.abs(nearest.distance))nearest={signal,distance};
+    }
+    if(!nearest){userSignalTracker.key='';userSignalTracker.distance=Infinity;hideSignal();return;}
+    const phase=trafficSignalPhaseFor(nearest.signal,elapsed);
+    if(els.signalIndicator&&nearest.distance>=-1&&nearest.distance<58){
+      els.signalIndicator.className=`dyn signal ${phase}`;
+      els.signalIndicator.textContent=phase==='amber'?'AMB':phase.toUpperCase();
+    }else hideSignal();
+    const key=`${nearest.signal.id}:${dir}`;
+    if(userSignalTracker.key===key){
+      const crossed=userSignalTracker.distance>1.0&&nearest.distance<=-.55;
+      if(crossed&&Math.abs(speedMps)>2.2&&phase==='red'&&elapsed-userSignalTracker.violatedAt>2.4){
+        recordRedLightViolation(elapsed);
+      }
+    }
+    userSignalTracker.key=key;userSignalTracker.distance=nearest.distance;
   }
 
   function singaporeClockHour(){
@@ -1512,10 +1814,20 @@
   }
 
   function updateSignalVisual(elapsed){
-    const phase=trafficSignalPhase(elapsed),nightBoost=1+lightingNightFactor*.75;
-    if(shared.signalRed)shared.signalRed.emissiveIntensity=(phase==='red'?2.8:.10)*nightBoost;
-    if(shared.signalAmber)shared.signalAmber.emissiveIntensity=(phase==='amber'?2.4:.08)*nightBoost;
-    if(shared.signalGreen)shared.signalGreen.emissiveIntensity=(phase==='green'?2.3:.08)*nightBoost;
+    const nightBoost=1+lightingNightFactor*.75;
+    if(shared.signalRed)shared.signalRed.emissiveIntensity=.72*nightBoost;
+    if(shared.signalAmber)shared.signalAmber.emissiveIntensity=.62*nightBoost;
+    if(shared.signalGreen)shared.signalGreen.emissiveIntensity=.62*nightBoost;
+    if(!trafficSignalVisuals||elapsed-lastSignalVisualUpdate<.11)return;
+    lastSignalVisualUpdate=elapsed;
+    const {points,reds,ambers,greens}=trafficSignalVisuals;
+    const m=new THREE.Matrix4(),pos=new THREE.Vector3(),quat=new THREE.Quaternion(),scale=new THREE.Vector3();
+    for(let i=0;i<points.length;i++){
+      const p=points[i],y=p.y||0,phase=trafficSignalPhaseFor(p,elapsed);
+      const setLamp=(mesh,py,active)=>{scale.setScalar(active?1.18:.42);pos.set(p.x,y+py,p.z-.15);m.compose(pos,quat,scale);mesh.setMatrixAt(i,m);};
+      setLamp(reds,2.86,phase==='red');setLamp(ambers,2.62,phase==='amber');setLamp(greens,2.38,phase==='green');
+    }
+    reds.instanceMatrix.needsUpdate=true;ambers.instanceMatrix.needsUpdate=true;greens.instanceMatrix.needsUpdate=true;
   }
 
   function registerServiceWorker(){
@@ -1739,7 +2051,7 @@
         const p=project(el.lat,el.lon),dist=Math.hypot(p.x-centerX,p.z-centerZ);
         if(tags.highway==='traffic_signals'&&dist<=SIGNAL_RADIUS_METERS+80&&signalPoints.length<MAX_TRAFFIC_SIGNALS){signalPoints.push({...p,id:el.id});continue;}
         if(tags.highway==='crossing'&&dist<=SIGNAL_RADIUS_METERS+80&&crossingPoints.length<MAX_CROSSINGS){crossingPoints.push(p);continue;}
-        if(tags.highway==='bus_stop'&&dist<=SIGNAL_RADIUS_METERS+80&&busStopPoints.length<MAX_BUS_STOPS){busStopPoints.push(p);continue;}
+        if(tags.highway==='bus_stop'&&dist<=SIGNAL_RADIUS_METERS+80&&busStopPoints.length<MAX_BUS_STOPS){busStopPoints.push({...p,id:el.id});continue;}
       }
       if (!Array.isArray(el.geometry) || el.geometry.length < 2) continue;
 
@@ -1749,7 +2061,7 @@
         const major = isMajorRoad(type);
         const roadY = roadElevationForTags(tags);
         const lanes = laneCountForRoad(tags);
-        const oneway=tags.oneway||'';
+        const oneway=tags.oneway||(tags.junction==='roundabout'?'yes':'');
         const isBridge=roadIsBridge(tags);
         const isTunnel=roadIsTunnel(tags);
         const points = cleanPolyline(el.geometry.map(p => ({...project(p.lat, p.lon), y:roadY})));
@@ -1780,6 +2092,11 @@
             ay:Number.isFinite(a.y)?a.y:roadY, by:Number.isFinite(b.y)?b.y:roadY, y:((Number.isFinite(a.y)?a.y:roadY)+(Number.isFinite(b.y)?b.y:roadY))/2, bridge:isBridge, tunnel:isTunnel, layer:parseRoadLayer(tags.layer),
             fromKey,toKey,
             oneway,
+            lanesForward: parseLaneNumber(tags['lanes:forward']),
+            lanesBackward: parseLaneNumber(tags['lanes:backward']),
+            turnLanes: tags['turn:lanes']||'',
+            turnLanesForward: tags['turn:lanes:forward']||'',
+            turnLanesBackward: tags['turn:lanes:backward']||'',
             name: roadDisplayName(tags),
             speedLimit: parseSpeedLimit(tags.maxspeed)
           };
@@ -1844,8 +2161,10 @@
     if(storefrontVerts.length){const mesh=meshFromFlatVertices(storefrontVerts,shared.storefront,false);mesh.renderOrder=3;group.add(mesh);}
 
     const signalDescriptors=mapSignalsToSegments(signalPoints,segments);
+    const busStopDescriptors=mapBusStopsToSegments(busStopPoints,segments);
     const roadGraphBuilt=buildRoadGraph(segments);
-    const trafficSignalCount = addTrafficSignals(group, signalPoints);
+    const signalBuild = addTrafficSignals(group, signalDescriptors);
+    const trafficSignalCount = signalBuild.count;
     const crossingCount = addPedestrianCrossings(group,crossingPoints,segments);
     const busStopCount = addBusStops(group,busStopPoints);
     const streetLightCount=addStreetLights(group,segments,centerX,centerZ,selectedBuildings);
@@ -1853,7 +2172,7 @@
     const treeCount = addRoadsideTrees(group, segments, centerX, centerZ, selectedBuildings);
     addLandmarksTo(group,centerX,centerZ);
     return {
-      group, segments, roadGraph:roadGraphBuilt, signalDescriptors, roadCount,
+      group, segments, roadGraph:roadGraphBuilt, signalDescriptors, busStopDescriptors, signalVisuals:signalBuild.visuals, roadCount,
       buildingCount: selectedBuildings.length,
       buildingColliders: selectedBuildings,
       waterPolygons, parkPolygons,
@@ -1954,7 +2273,45 @@
     const out=[];
     for(const p of points){
       const hit=nearestRoadHitInSegments(p.x,p.z,segments);if(!hit||hit.dist>14)continue;
-      p.y=segmentYAt(hit.seg,hit.t);const d={x:p.x,z:p.z,y:p.y,seg:hit.seg,t:hit.t};hit.seg.signals.push(d);out.push(d);
+      p.y=segmentYAt(hit.seg,hit.t);
+      const d={x:p.x,z:p.z,y:p.y,id:p.id||`sig-${out.length}`,seg:hit.seg,t:hit.t,phaseGroup:0,phaseOffset:0};
+      hit.seg.signals.push(d);out.push(d);
+    }
+    assignTrafficSignalPhases(out);
+    return out;
+  }
+
+  function assignTrafficSignalPhases(signals){
+    const clusters=[];
+    for(const signal of signals){
+      let cluster=clusters.find(c=>Math.hypot(signal.x-c.x,signal.z-c.z)<34);
+      if(!cluster){
+        cluster={x:signal.x,z:signal.z,items:[],baseAngle:null,phaseOffset:pseudoRandom(signal.x*.071+signal.z*.053)*TRAFFIC_SIGNAL_CYCLE_SECONDS};
+        clusters.push(cluster);
+      }
+      cluster.items.push(signal);
+      cluster.x+=(signal.x-cluster.x)/cluster.items.length;cluster.z+=(signal.z-cluster.z)/cluster.items.length;
+    }
+    clusters.forEach((cluster,clusterIndex)=>{
+      for(const signal of cluster.items){
+        const dx=signal.seg.bx-signal.seg.ax,dz=signal.seg.bz-signal.seg.az;
+        let angle=Math.atan2(dz,dx);while(angle<0)angle+=Math.PI;while(angle>=Math.PI)angle-=Math.PI;
+        if(cluster.baseAngle==null)cluster.baseAngle=angle;
+        let diff=Math.abs(angle-cluster.baseAngle);diff=Math.min(diff,Math.PI-diff);
+        signal.phaseGroup=diff>Math.PI/4?1:0;
+        signal.phaseOffset=cluster.phaseOffset;
+        signal.clusterId=clusterIndex;
+      }
+    });
+  }
+
+  function mapBusStopsToSegments(points,segments){
+    for(const seg of segments)seg.busStops=[];
+    const out=[];
+    for(let i=0;i<points.length;i++){
+      const p=points[i],hit=nearestRoadHitInSegments(p.x,p.z,segments);if(!hit||hit.dist>18)continue;
+      p.y=segmentYAt(hit.seg,hit.t);const d={x:p.x,z:p.z,y:p.y,id:p.id||`bus-${i}`,seg:hit.seg,t:hit.t};
+      hit.seg.busStops.push(d);out.push(d);
     }
     return out;
   }
@@ -2113,6 +2470,11 @@
     }
   }
 
+  function parseLaneNumber(raw){
+    const n=Number.parseInt(raw,10);
+    return Number.isFinite(n)&&n>0?n:null;
+  }
+
   function laneCountForRoad(tags={}) {
     const tagged=Number.parseInt(tags.lanes,10);
     if(Number.isFinite(tagged)&&tagged>0&&tagged<9)return tagged;
@@ -2217,7 +2579,7 @@
   }
 
   function addTrafficSignals(group, points) {
-    if(!points.length)return 0;
+    if(!points.length)return {count:0,visuals:null};
     const count=Math.min(points.length,MAX_TRAFFIC_SIGNALS);
     const poleGeo=new THREE.CylinderGeometry(.075,.095,2.55,6);
     const headGeo=new THREE.BoxGeometry(.42,.84,.28);
@@ -2229,8 +2591,7 @@
     const greens=new THREE.InstancedMesh(lampGeo,shared.signalGreen,count);
     const m=new THREE.Matrix4(),pos=new THREE.Vector3(),quat=new THREE.Quaternion(),scale=new THREE.Vector3(1,1,1);
     for(let i=0;i<count;i++){
-      const p=points[i];
-      const y=p.y||0;
+      const p=points[i],y=p.y||0;
       pos.set(p.x,y+1.275,p.z);m.compose(pos,quat,scale);poles.setMatrixAt(i,m);
       pos.set(p.x,y+2.62,p.z);m.compose(pos,quat,scale);heads.setMatrixAt(i,m);
       pos.set(p.x,y+2.86,p.z-.15);m.compose(pos,quat,scale);reds.setMatrixAt(i,m);
@@ -2238,7 +2599,7 @@
       pos.set(p.x,y+2.38,p.z-.15);m.compose(pos,quat,scale);greens.setMatrixAt(i,m);
     }
     [poles,heads,reds,ambers,greens].forEach(mesh=>{mesh.instanceMatrix.needsUpdate=true;mesh.castShadow=false;mesh.receiveShadow=false;group.add(mesh);});
-    return count;
+    return {count,visuals:{points:points.slice(0,count),poles,heads,reds,ambers,greens}};
   }
 
   function addPedestrianCrossings(group,points,segments) {
@@ -2613,6 +2974,10 @@
     roadSegments=built.segments;
     roadGraph=built.roadGraph||buildRoadGraph(roadSegments);
     trafficSignalsWorld=built.signalDescriptors||[];
+    busStopsWorld=built.busStopDescriptors||[];
+    trafficSignalVisuals=built.signalVisuals||null;
+    lastSignalVisualUpdate=-Infinity;
+    userSignalTracker={key:'',distance:Infinity,violatedAt:-Infinity};
     buildingColliders=built.buildingColliders||[];
     currentWaterPolygons=built.waterPolygons||[];
     currentParkPolygons=built.parkPolygons||[];
@@ -2871,6 +3236,7 @@
     }
 
     const elevationHit=nearestRoadHit(car.position.x,car.position.z,false);
+    updateUserTrafficRuleState(elapsed,elevationHit);
     const elevationTarget=elevationHit&&elevationHit.dist<elevationHit.seg.width/2+4?segmentYAt(elevationHit.seg,elevationHit.t):0;
     const elevationStep=Math.abs(elevationTarget-lastElevationTarget);
     if(elevationStep>.035&&newAbsSpeed>4)roadShock=Math.max(roadShock,THREE.MathUtils.clamp(elevationStep*.9,0,.65));
