@@ -1,6 +1,6 @@
 (() => {
   'use strict';
-  const BUILD_ID = '20260901toa2';
+  const BUILD_ID = '20260902fidelity1';
   const isServiceWorker = typeof ServiceWorkerGlobalScope !== 'undefined' && self instanceof ServiceWorkerGlobalScope;
 
   if (isServiceWorker) {
