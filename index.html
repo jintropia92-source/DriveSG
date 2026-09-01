@@ -10,7 +10,8 @@
   <meta name="format-detection" content="telephone=no" />
   <meta name="color-scheme" content="dark" />
   <title>DriveSG — Singapore, playable.</title>
-  <link rel="stylesheet" href="styles.css?b=20260901real" />
+  <link rel="stylesheet" href="styles.css?b=20260901backend1" />
+  <script>window.DRIVESG_CONFIG={backendBase:'https://drivesg-api.vercel.app'};</script>
 </head>
 <body>
   <main id="app" aria-label="DriveSG">
@@ -30,6 +31,7 @@
         <span class="place-copy"><small id="placeEyebrow">DRIVING AROUND</small><strong id="locationName">Marina Bay</strong></span>
         <span class="chevron">⌄</span>
       </button>
+      <div id="weatherBadge" class="weather-badge" aria-live="polite"><span id="weatherIcon">◐</span><span id="weatherText">Singapore weather</span></div>
       <div class="top-actions">
         <button id="lightingBtn" class="round-action" type="button" aria-label="Cycle lighting mode" title="Lighting: Auto">☀</button>
         <button id="soundBtn" class="round-action" type="button" aria-label="Toggle engine sound" title="Engine sound">♪</button>
@@ -98,7 +100,7 @@
 
       <div class="panel-foot">
         <span class="status-dot"></span>
-        <span>OpenStreetMap world · OSRM route preview · Singapore only</span>
+        <span>DriveSG backend · OpenStreetMap world · Singapore only</span>
       </div>
     </aside>
 
@@ -147,6 +149,6 @@
     <footer class="attribution"><a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">© OpenStreetMap</a><span id="routingCredit"></span></footer>
   </main>
 
-  <script src="boot.js?b=20260901real"></script>
+  <script src="boot.js?b=20260901backend1"></script>
 </body>
 </html>

@@ -10,6 +10,10 @@
   // without rewriting the driving, navigation or UI layers.
   const ROUTE_ENDPOINT = CONFIG.routeEndpoint || 'https://router.project-osrm.org/route/v1/driving';
   const GEOCODE_ENDPOINT = CONFIG.geocodeEndpoint || 'https://nominatim.openstreetmap.org/search';
+  const BACKEND_BASE = String(CONFIG.backendBase || '').replace(/\/$/, '');
+  const BACKEND_ACTIVE = Boolean(BACKEND_BASE);
+  const ENVIRONMENT_REFRESH_SECONDS = 240;
+  const TRAFFIC_REFRESH_SECONDS = 75;
   const ROUTE_OFFTRACK_METERS = 52;
   const ROUTE_REROUTE_COOLDOWN = 11;
   const ARRIVAL_METERS = 24;
@@ -125,6 +129,17 @@
   let currentParkPolygons = [];
   let lastNavUpdate = -Infinity;
   let navigation = makeEmptyNavigation();
+  let environmentState = { condition:'clear', precipitationMm:0, cloudPct:25, temperatureC:null, humidityPct:null, windKmh:null, provider:'' };
+  let environmentBusy = false;
+  let lastEnvironmentRefresh = -Infinity;
+  let rainPoints = null;
+  let rainPositions = null;
+  let wetness = 0;
+  let trafficDataBusy = false;
+  let lastTrafficDataRefresh = -Infinity;
+  let liveTrafficBands = [];
+  let liveTrafficIncidents = [];
+  let lastIncidentToastKey = '';
   const mapCache = new Map();
   const geocodeCache = new Map();
 
@@ -139,6 +154,9 @@
     resetBtn: document.getElementById('resetBtn'),
     lightingBtn: document.getElementById('lightingBtn'),
     soundBtn: document.getElementById('soundBtn'),
+    weatherBadge: document.getElementById('weatherBadge'),
+    weatherIcon: document.getElementById('weatherIcon'),
+    weatherText: document.getElementById('weatherText'),
     nearMeBtn: document.getElementById('nearMeBtn'),
     randomBtn: document.getElementById('randomBtn'),
     randomBtnLabel: document.getElementById('randomBtnLabel'),
@@ -205,6 +223,8 @@
     setPlaceMode('navigate');
     initThree();
     createCar();
+    createRainSystem();
+    registerServiceWorker();
     animate();
 
     const saved = readSavedPlace();
@@ -452,6 +472,19 @@
       const c=cached?._driveCenter;if(c&&haversineMeters(lat,lon,c.lat,c.lon)<185)return cached;
     }
 
+    if(BACKEND_ACTIVE){
+      const controller=new AbortController(),timeoutId=setTimeout(()=>controller.abort(),18000);
+      try{
+        const url=`${BACKEND_BASE}/api/map?lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lon)}&roadRadius=${ROAD_RADIUS_METERS}&buildingRadius=${BUILDING_RADIUS_METERS}&surfaceRadius=${SURFACE_RADIUS_METERS}&signalRadius=${SIGNAL_RADIUS_METERS}`;
+        const res=await fetch(url,{headers:{Accept:'application/json'},signal:controller.signal});
+        if(res.ok){
+          const json=await res.json();
+          if(json?.elements?.length){json._driveCenter=json._driveCenter||{lat,lon};mapCache.set(cacheKey,json);while(mapCache.size>6)mapCache.delete(mapCache.keys().next().value);return json;}
+        }
+      }catch(err){console.warn('DriveSG backend map fallback',err?.message||err);}
+      finally{clearTimeout(timeoutId);}
+    }
+
     const query = `[out:json][timeout:24];(
       way["highway"~"${ROAD_QUERY}"](around:${ROAD_RADIUS_METERS},${lat},${lon});
       way["building"](around:${BUILDING_RADIUS_METERS},${lat},${lon});
@@ -563,8 +596,14 @@
     const controller=new AbortController();
     const timeoutId=setTimeout(()=>controller.abort(),12000);
     try{
-      const url=`${ROUTE_ENDPOINT}/${start.lon},${start.lat};${destination.lon},${destination.lat}?steps=true&geometries=geojson&overview=full&alternatives=false`;
-      const res=await fetch(url,{headers:{Accept:'application/json'},signal:controller.signal});
+      const url=BACKEND_ACTIVE
+        ?`${BACKEND_BASE}/api/route?startLat=${encodeURIComponent(start.lat)}&startLon=${encodeURIComponent(start.lon)}&endLat=${encodeURIComponent(destination.lat)}&endLon=${encodeURIComponent(destination.lon)}`
+        :`${ROUTE_ENDPOINT}/${start.lon},${start.lat};${destination.lon},${destination.lat}?steps=true&geometries=geojson&overview=full&alternatives=false`;
+      let res=await fetch(url,{headers:{Accept:'application/json'},signal:controller.signal});
+      if(!res.ok&&BACKEND_ACTIVE){
+        const fallback=`${ROUTE_ENDPOINT}/${start.lon},${start.lat};${destination.lon},${destination.lat}?steps=true&geometries=geojson&overview=full&alternatives=false`;
+        res=await fetch(fallback,{headers:{Accept:'application/json'},signal:controller.signal});
+      }
       if(!res.ok)throw new Error(`Routing ${res.status}`);
       const data=await res.json();
       if(data?.code!=='Ok'||!data.routes?.length)throw new Error(data?.code||'No route');
@@ -1023,6 +1062,10 @@
 
     const signalPhase=trafficSignalPhase(elapsed),signalColor=signalPhase==='red'?'#ff776f':(signalPhase==='amber'?'#ffd36b':'#75e696');
     for(const sig of trafficSignalsWorld){if(!near(sig.x,sig.z))continue;const q=toScreen(sig.x,sig.z);ctx.beginPath();ctx.arc(q.x,q.y,2.3,0,Math.PI*2);ctx.fillStyle=signalColor;ctx.fill();}
+    for(const incident of liveTrafficIncidents){
+      const p=project(Number(incident.latitude),Number(incident.longitude));if(!near(p.x,p.z))continue;const q=toScreen(p.x,p.z);
+      ctx.beginPath();ctx.arc(q.x,q.y,4.2,0,Math.PI*2);ctx.fillStyle='#ff6b5f';ctx.fill();ctx.strokeStyle='#531d18';ctx.lineWidth=1.4;ctx.stroke();
+    }
 
     if(navigation.active&&navigation.routeWorld.length>1){
       ctx.beginPath();let begun=false;
@@ -1083,11 +1126,28 @@
     return dirs[Math.round(deg/45)%8];
   }
 
+  function trafficDensityForTime(){
+    const h=singaporeClockHour();
+    if(h>=7&&h<9.8)return 1.28;
+    if(h>=16.8&&h<20.2)return 1.36;
+    if(h>=0&&h<5.5)return .48;
+    if(h>=22.5)return .66;
+    return .90;
+  }
+
+  function trafficSpeedFactorForTime(){
+    const h=singaporeClockHour();
+    if(h>=7&&h<9.8)return .78;
+    if(h>=16.8&&h<20.2)return .72;
+    if(h>=0&&h<5.5)return 1.06;
+    return .94;
+  }
+
   function createAmbientTraffic(group,segments,graph=roadGraph) {
     ambientTraffic=[];trafficMesh=null;
     const eligible=segments.filter(s=>Math.hypot(s.bx-s.ax,s.bz-s.az)>22&&!/service|living_street/.test(s.type||''));
     if(!eligible.length||!group)return;
-    const count=Math.min(MAX_AMBIENT_TRAFFIC,Math.max(9,Math.floor(eligible.length/22)));
+    const count=Math.min(MAX_AMBIENT_TRAFFIC,Math.max(5,Math.floor(Math.max(9,eligible.length/22)*trafficDensityForTime())));
     const geo=new THREE.BoxGeometry(1.68,.68,3.65);
     trafficMesh=new THREE.InstancedMesh(geo,trafficMaterial,count);
     trafficMesh.castShadow=false;trafficMesh.receiveShadow=false;
@@ -1106,6 +1166,7 @@
     const limit=seg.speedLimit?seg.speedLimit/3.6:null;
     let base=/motorway|trunk/.test(seg.type||'')?19:/primary|secondary/.test(seg.type||'')?13:9;
     base*=.86+pseudoRandom(seed*29+11)*.30;
+    if(Number.isFinite(seg.liveTrafficKmh)&&seg.liveTrafficKmh>0)base=Math.min(base,Math.max(2.2,seg.liveTrafficKmh/3.6*.96));
     return limit?Math.min(base,Math.max(5,limit*.92)):base;
   }
 
@@ -1145,7 +1206,7 @@
     const red=trafficSignalIsRed(elapsed),m=new THREE.Matrix4(),pos=new THREE.Vector3(),quat=new THREE.Quaternion(),scale=new THREE.Vector3();
     ambientTraffic.forEach((a,i)=>{
       let seg=a.seg,dx=seg.bx-seg.ax,dz=seg.bz-seg.az,len=Math.hypot(dx,dz)||1;
-      let target=a.cruise;
+      let target=a.cruise*trafficSpeedFactorForTime()*(1-wetness*.16);
       const sigDist=red?signalDistanceAhead(a):Infinity;
       if(sigDist<16)target=Math.min(target,Math.max(0,(sigDist-3.2)*.72));
       for(const other of ambientTraffic){
@@ -1215,10 +1276,12 @@
       const n=lightingNightFactor;
       const day=new THREE.Color(0xa9c5cf),dusk=new THREE.Color(0x7a7181),night=new THREE.Color(0x07131d),sky=new THREE.Color();
       if(n<.56)sky.lerpColors(day,dusk,n/.56);else sky.lerpColors(dusk,night,(n-.56)/.44);
-      scene.background.copy(sky);if(scene.fog){scene.fog.color.copy(sky);scene.fog.density=THREE.MathUtils.lerp(.00125,.00158,n);}
-      if(horizonHaze){horizonHaze.material.color.copy(sky.clone().lerp(new THREE.Color(0x6a7c83),.28));horizonHaze.material.opacity=THREE.MathUtils.lerp(.22,.12,n);}
-      if(hemi)hemi.intensity=THREE.MathUtils.lerp(2.35,.58,n);
-      if(sun){sun.intensity=THREE.MathUtils.lerp(2.25,.15,n);sun.color.set(n>.32?0xffb56b:0xffeed0);}
+      const cloud=THREE.MathUtils.clamp((Number(environmentState.cloudPct)||0)/100,0,1),rainDim=/rain/.test(environmentState.condition||'')?.22:0;
+      sky.lerp(new THREE.Color(0x67767c),Math.max(0,cloud-.35)*.34+rainDim);
+      scene.background.copy(sky);if(scene.fog){scene.fog.color.copy(sky);scene.fog.density=THREE.MathUtils.lerp(.00125,.00158,n)+wetness*.00046;}
+      if(horizonHaze){horizonHaze.material.color.copy(sky.clone().lerp(new THREE.Color(0x6a7c83),.28));horizonHaze.material.opacity=THREE.MathUtils.lerp(.22,.12,n)+wetness*.07;}
+      if(hemi)hemi.intensity=THREE.MathUtils.lerp(2.35,.58,n)*(1-cloud*.22-rainDim);
+      if(sun){sun.intensity=THREE.MathUtils.lerp(2.25,.15,n)*(1-cloud*.52-rainDim);sun.color.set(n>.32?0xffb56b:0xffeed0);}
       if(shared.windows)shared.windows.emissiveIntensity=THREE.MathUtils.lerp(.06,1.65,n);
       if(shared.storefront)shared.storefront.emissiveIntensity=THREE.MathUtils.lerp(.10,1.28,n);
       if(shared.streetLamp)shared.streetLamp.emissiveIntensity=THREE.MathUtils.lerp(.08,4.6,n);
@@ -1232,6 +1295,109 @@
     if(shared.signalRed)shared.signalRed.emissiveIntensity=(phase==='red'?2.8:.10)*nightBoost;
     if(shared.signalAmber)shared.signalAmber.emissiveIntensity=(phase==='amber'?2.4:.08)*nightBoost;
     if(shared.signalGreen)shared.signalGreen.emissiveIntensity=(phase==='green'?2.3:.08)*nightBoost;
+  }
+
+  function registerServiceWorker(){
+    // Four-file GitHub Pages deployment intentionally has no service worker.
+    // Backend caching avoids extra stale-bundle risk on iPhone Safari.
+  }
+
+  function createRainSystem(){
+    const count=760;
+    const positions=new Float32Array(count*3);
+    for(let i=0;i<count;i++){
+      positions[i*3]=(pseudoRandom(i*17+1)-.5)*72;
+      positions[i*3+1]=6+pseudoRandom(i*29+3)*34;
+      positions[i*3+2]=(pseudoRandom(i*41+7)-.5)*88;
+    }
+    const geo=new THREE.BufferGeometry();geo.setAttribute('position',new THREE.BufferAttribute(positions,3));
+    const mat=new THREE.PointsMaterial({color:0xbfd8e7,size:.09,transparent:true,opacity:.0,depthWrite:false,sizeAttenuation:true});
+    rainPoints=new THREE.Points(geo,mat);rainPoints.visible=false;rainPositions=positions;scene.add(rainPoints);
+  }
+
+  function weatherIconFor(condition){
+    return {'heavy-rain':'☔','rain':'☂','cloudy':'☁','partly-cloudy':'◒','clear':'☀'}[condition]||'◐';
+  }
+
+  function updateWeatherBadge(){
+    if(!els.weatherBadge)return;
+    const c=environmentState.condition||'clear',temp=Number(environmentState.temperatureC);
+    els.weatherBadge.classList.add('show');
+    els.weatherBadge.classList.toggle('rainy',/rain/.test(c));
+    els.weatherIcon.textContent=weatherIconFor(c);
+    const label=c==='heavy-rain'?'Heavy rain':c==='rain'?'Rain':c==='partly-cloudy'?'Partly cloudy':c==='cloudy'?'Cloudy':'Clear';
+    els.weatherText.textContent=Number.isFinite(temp)?`${label} · ${Math.round(temp)}°C`:label;
+  }
+
+  async function refreshEnvironment(){
+    if(environmentBusy||!car)return;environmentBusy=true;
+    const c=currentCarCoords();
+    try{
+      let data=null;
+      if(BACKEND_ACTIVE){
+        const res=await fetch(`${BACKEND_BASE}/api/environment?lat=${encodeURIComponent(c.lat)}&lon=${encodeURIComponent(c.lon)}`,{headers:{Accept:'application/json'}});if(res.ok)data=await res.json();
+      }
+      if(!data){
+        const url=`https://api.open-meteo.com/v1/forecast?latitude=${c.lat}&longitude=${c.lon}&current=temperature_2m,relative_humidity_2m,precipitation,rain,weather_code,cloud_cover,wind_speed_10m&timezone=Asia%2FSingapore&forecast_days=1`;
+        const res=await fetch(url,{headers:{Accept:'application/json'}});if(res.ok){const raw=await res.json(),x=raw?.current||{},p=Number(x.precipitation??x.rain??0)||0,code=Number(x.weather_code)||0;data={condition:p>=7||[65,67,82,95,96,99].includes(code)?'heavy-rain':(p>.1||[51,53,55,56,57,61,63,66,80,81].includes(code)?'rain':([1,2].includes(code)?'partly-cloudy':(code===3||[45,48].includes(code)?'cloudy':'clear'))),precipitationMm:p,cloudPct:Number(x.cloud_cover),temperatureC:Number(x.temperature_2m),humidityPct:Number(x.relative_humidity_2m),windKmh:Number(x.wind_speed_10m),provider:'Open-Meteo'};}
+      }
+      if(data){environmentState={...environmentState,...data};updateWeatherBadge();}
+    }catch(err){console.warn('Environment refresh failed',err?.message||err);}
+    finally{environmentBusy=false;}
+  }
+
+  function maybeRefreshEnvironment(elapsed){
+    if(lastEnvironmentRefresh>=0&&elapsed-lastEnvironmentRefresh<ENVIRONMENT_REFRESH_SECONDS)return;
+    lastEnvironmentRefresh=elapsed;refreshEnvironment();
+  }
+
+  function updateWeatherEffects(dt){
+    const rainTarget=environmentState.condition==='heavy-rain'?1:(environmentState.condition==='rain'?.58:0);
+    wetness+=(rainTarget-wetness)*Math.min(1,dt*(rainTarget>wetness?1.25:.18));
+    if(shared.road){shared.road.roughness=THREE.MathUtils.lerp(.96,.46,wetness);shared.road.metalness=THREE.MathUtils.lerp(0,.08,wetness);}
+    if(shared.majorRoad){shared.majorRoad.roughness=THREE.MathUtils.lerp(.95,.43,wetness);shared.majorRoad.metalness=THREE.MathUtils.lerp(0,.09,wetness);}
+    if(shared.roadEdge)shared.roadEdge.roughness=THREE.MathUtils.lerp(1,.72,wetness);
+    if(rainPoints&&rainPositions){
+      rainPoints.visible=wetness>.05;rainPoints.material.opacity=THREE.MathUtils.lerp(0,.72,wetness);rainPoints.position.set(car.position.x,carRoadY,car.position.z);
+      if(rainPoints.visible){
+        const fall=(24+wetness*34)*dt;
+        for(let i=0;i<rainPositions.length;i+=3){rainPositions[i+1]-=fall;if(rainPositions[i+1]<-.6){rainPositions[i+1]=22+pseudoRandom(i+Math.floor(clock.elapsedTime*10))*18;rainPositions[i]=(pseudoRandom(i*3+clock.elapsedTime)-.5)*72;rainPositions[i+2]=(pseudoRandom(i*7+clock.elapsedTime)-.5)*88;}}
+        rainPoints.geometry.attributes.position.needsUpdate=true;
+      }
+    }
+  }
+
+  function normalizeRoadName(name){return String(name||'').toUpperCase().replace(/[^A-Z0-9]/g,'');}
+
+  function applyLiveTrafficData(data){
+    liveTrafficBands=Array.isArray(data?.speedBands)?data.speedBands:[];
+    liveTrafficIncidents=Array.isArray(data?.incidents)?data.incidents.filter(i=>Number.isFinite(Number(i.latitude))&&Number.isFinite(Number(i.longitude))):[];
+    const byName=new Map();
+    for(const b of liveTrafficBands){const k=normalizeRoadName(b.roadName);if(!k)continue;if(!byName.has(k))byName.set(k,[]);byName.get(k).push(b);}
+    for(const seg of roadSegments){
+      seg.liveTrafficKmh=null;const bands=byName.get(normalizeRoadName(seg.name));if(!bands?.length)continue;
+      const mx=(seg.ax+seg.bx)/2,mz=(seg.az+seg.bz)/2,mc=unproject(mx,mz);let best=null,bestD=Infinity;
+      for(const b of bands){const lat=(Number(b.startLat)+Number(b.endLat))/2,lon=(Number(b.startLon)+Number(b.endLon))/2;if(!Number.isFinite(lat)||!Number.isFinite(lon))continue;const d=haversineMeters(mc.lat,mc.lon,lat,lon);if(d<bestD){bestD=d;best=b;}}
+      if(best&&bestD<220){const a=Number(best.minSpeed),z=Number(best.maxSpeed);seg.liveTrafficKmh=Number.isFinite(a)&&Number.isFinite(z)?(a+z)/2:(Number.isFinite(z)?z:null);}
+    }
+    ambientTraffic.forEach((a,i)=>{a.cruise=trafficCruiseFor(a.seg,i+17);});
+    if(liveTrafficIncidents.length){
+      const cc=currentCarCoords();let nearest=null,dist=Infinity;
+      for(const i of liveTrafficIncidents){const d=haversineMeters(cc.lat,cc.lon,Number(i.latitude),Number(i.longitude));if(d<dist){dist=d;nearest=i;}}
+      if(nearest&&dist<650){const key=`${nearest.type}:${nearest.message}`;if(key!==lastIncidentToastKey){lastIncidentToastKey=key;showToast(`${nearest.type||'Traffic incident'} nearby · ${Math.round(dist/50)*50} m`);}}
+    }
+  }
+
+  async function refreshLiveTraffic(){
+    if(trafficDataBusy||!BACKEND_ACTIVE||!car)return;trafficDataBusy=true;
+    const c=currentCarCoords();
+    try{const res=await fetch(`${BACKEND_BASE}/api/traffic?lat=${encodeURIComponent(c.lat)}&lon=${encodeURIComponent(c.lon)}&radius=2600`,{headers:{Accept:'application/json'}});if(res.ok){const data=await res.json();if(data?.configured)applyLiveTrafficData(data);}}
+    catch(err){console.warn('Live traffic refresh failed',err?.message||err);}finally{trafficDataBusy=false;}
+  }
+
+  function maybeRefreshLiveTraffic(elapsed){
+    if(lastTrafficDataRefresh>=0&&elapsed-lastTrafficDataRefresh<TRAFFIC_REFRESH_SECONDS)return;
+    lastTrafficDataRefresh=elapsed;refreshLiveTraffic();
   }
 
   function toggleEngineSound() {
@@ -2318,8 +2484,8 @@
     const panelOpen=els.placesPanel.classList.contains('open');
     const gas=panelOpen?0:input.gas,brake=panelOpen?0:input.brake,steer=panelOpen?0:input.steer;
 
-    const accel=7.0;
-    const brakeForce=15.8;
+    const accel=7.0*(1-wetness*.05);
+    const brakeForce=15.8*(1-wetness*.14);
     const reverseAccel=4.8;
 
     if(gas>0){
@@ -2352,7 +2518,7 @@
     speedMps=THREE.MathUtils.clamp(speedMps,-8.8,maxForward);
 
     const absSpeed=Math.abs(speedMps);
-    const steerLimit=THREE.MathUtils.lerp(.46,.17,Math.min(absSpeed/33,1));
+    const steerLimit=THREE.MathUtils.lerp(.46,.17,Math.min(absSpeed/33,1))*(1-wetness*.07);
     const wheelbase=2.68;
     if(absSpeed>.10){
       const rawYawRate=(speedMps/wheelbase)*Math.tan(steer*steerLimit);
@@ -2511,6 +2677,9 @@
     requestAnimationFrame(animate);
     const dt=Math.min(clock.getDelta(),.045);
     const elapsed=clock.elapsedTime;
+    maybeRefreshEnvironment(elapsed);
+    maybeRefreshLiveTraffic(elapsed);
+    updateWeatherEffects(dt);
     updateWorldLighting(dt,elapsed);
     updateSignalVisual(elapsed);
     updateAmbientTraffic(dt,elapsed);
@@ -2688,17 +2857,23 @@
     try{
       let place=geocodeCache.get(key);
       if(!place){
-        const url=`${GEOCODE_ENDPOINT}?format=jsonv2&limit=1&countrycodes=sg&accept-language=en&q=${encodeURIComponent(query+', Singapore')}`;
         const controller=new AbortController();
         const timeoutId=setTimeout(()=>controller.abort(),9000);
-        let res;
-        try{res=await fetch(url,{headers:{Accept:'application/json'},signal:controller.signal});}
-        finally{clearTimeout(timeoutId);}
-        if(!res.ok)throw new Error(`Search ${res.status}`);
-        const results=await res.json();if(!results.length)throw new Error('No match');
-        const lat=Number(results[0].lat),lon=Number(results[0].lon);if(!insideSingapore(lat,lon))throw new Error('Outside Singapore');
-        const label=(results[0].display_name||query).split(',')[0];
-        place={name:label,subtitle:'Search result',lat,lon};
+        try{
+          if(BACKEND_ACTIVE){
+            const res=await fetch(`${BACKEND_BASE}/api/geocode?q=${encodeURIComponent(query)}`,{headers:{Accept:'application/json'},signal:controller.signal});
+            if(res.ok){const data=await res.json();const lat=Number(data.lat),lon=Number(data.lon);if(insideSingapore(lat,lon))place={name:data.name||query,subtitle:data.subtitle||'Search result',lat,lon};}
+          }
+          if(!place){
+            const url=`${GEOCODE_ENDPOINT}?format=jsonv2&limit=1&countrycodes=sg&accept-language=en&q=${encodeURIComponent(query+', Singapore')}`;
+            const res=await fetch(url,{headers:{Accept:'application/json'},signal:controller.signal});
+            if(!res.ok)throw new Error(`Search ${res.status}`);
+            const results=await res.json();if(!results.length)throw new Error('No match');
+            const lat=Number(results[0].lat),lon=Number(results[0].lon);if(!insideSingapore(lat,lon))throw new Error('Outside Singapore');
+            const label=(results[0].display_name||query).split(',')[0];
+            place={name:label,subtitle:'Search result',lat,lon};
+          }
+        }finally{clearTimeout(timeoutId);}
         geocodeCache.set(key,place);while(geocodeCache.size>30)geocodeCache.delete(geocodeCache.keys().next().value);
       }
       els.searchMsg.textContent='';

@@ -415,3 +415,11 @@ body.panel-open .minimap-card, body.panel-open .nav-banner { opacity:.08; pointe
   .place-pill { width:180px; max-width:180px; }
   .nav-banner { width:min(390px,48vw); }
 }
+
+/* Full-stack environment layer */
+.weather-badge{position:absolute;z-index:36;top:max(10px,env(safe-area-inset-top));left:50%;transform:translateX(-50%) translateY(-6px);display:flex;align-items:center;gap:7px;padding:7px 10px;border:1px solid rgba(255,255,255,.12);border-radius:999px;background:rgba(7,16,20,.66);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);box-shadow:0 6px 24px rgba(0,0,0,.14);font-size:11px;font-weight:800;letter-spacing:.02em;color:rgba(255,255,255,.88);opacity:0;pointer-events:none;transition:opacity .25s,transform .25s,border-color .25s}
+.weather-badge.show{opacity:1;transform:translateX(-50%) translateY(0)}
+.weather-badge.rainy{border-color:rgba(156,208,235,.34);background:rgba(12,31,42,.74)}
+.weather-badge span:first-child{font-size:14px;line-height:1}
+@media (max-width:780px) and (orientation:landscape){.weather-badge{font-size:10px;padding:6px 8px;gap:5px;max-width:150px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.weather-badge span:first-child{font-size:12px}}
+@media (max-width:700px) and (orientation:landscape){.weather-badge{display:none}}
