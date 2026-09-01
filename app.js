@@ -1,7 +1,7 @@
 (() => {
   'use strict';
 
-  const BUILD_ID = '20260901final1';
+  const BUILD_ID = '20260901experience1';
   const SG_BOUNDS = { minLat: 1.16, maxLat: 1.456, minLon: 103.60, maxLon: 104.10 };
   const CONFIG = window.DRIVESG_CONFIG || {};
   const OVERPASS_ENDPOINTS = Array.isArray(CONFIG.overpassEndpoints) && CONFIG.overpassEndpoints.length
@@ -14,7 +14,13 @@
   const BACKEND_BASE = String(CONFIG.backendBase || '').replace(/\/$/, '');
   const BACKEND_ACTIVE = Boolean(BACKEND_BASE);
   const BACKEND_CIRCUIT_SECONDS = 45;
-  const ONEMAP_TILE_BASE = 'https://www.onemap.gov.sg/maps/tiles/Default';
+  const ONEMAP_TILE_BASES = {
+    day:'https://www.onemap.gov.sg/maps/tiles/Default',
+    night:'https://www.onemap.gov.sg/maps/tiles/Night'
+  };
+  const ELEVATION_ENDPOINT = 'https://api.open-meteo.com/v1/elevation';
+  const TERRAIN_GRID_SIZE = 7;
+  const TERRAIN_SPAN_METERS = 3200;
   const ONEMAP_MIN_ZOOM = 11;
   const ONEMAP_MAX_ZOOM = 19;
   const ONEMAP_TILE_SIZE = 256;
@@ -58,6 +64,58 @@
     { id:'toa-woodlands', name:'Northbound', difficulty:'LONG', start:{name:'Toa Payoh',subtitle:'Challenge start',lat:1.3344,lon:103.8497}, finish:{name:'Woodlands',subtitle:'Challenge finish',lat:1.4367,lon:103.7862} },
     { id:'marina-changi', name:'Airport Express', difficulty:'EPIC', start:{name:'Marina Bay',subtitle:'Challenge start',lat:1.2829,lon:103.8587}, finish:{name:'Jewel Changi Airport',subtitle:'Challenge finish',lat:1.3602,lon:103.9896} }
   ];
+
+  const DISCOVERY_ZONES = [
+    {id:'marina-bay',name:'Marina Bay',lat:1.2837,lon:103.8583,radius:1150,tagline:'Singapore’s modern waterfront',text:'A compact loop of skyline landmarks, reclaimed waterfront and ceremonial city streets.',tip:'Singapore drives on the left; keep left unless overtaking.'},
+    {id:'civic',name:'Civic District',lat:1.2916,lon:103.8523,radius:720,tagline:'Historic civic core',text:'Colonial-era civic buildings sit beside the Singapore River and the modern CBD.',tip:'City-centre junctions can be wide; follow lane arrows and signal phases.'},
+    {id:'orchard',name:'Orchard Road',lat:1.3044,lon:103.8337,radius:1050,tagline:'Singapore’s shopping belt',text:'A dense boulevard of malls, hotels, offices and tree-lined side streets.',tip:'Expect frequent junctions and lane changes on major urban roads.'},
+    {id:'chinatown',name:'Chinatown',lat:1.2839,lon:103.8439,radius:720,tagline:'Shophouses beside the CBD',text:'Older street grids and low-rise shophouse districts sit just minutes from the skyscrapers.',tip:'Older central streets are tighter than the big arterial roads around them.'},
+    {id:'kampong-glam',name:'Kampong Glam',lat:1.3023,lon:103.8593,radius:620,tagline:'Historic Malay-Arab quarter',text:'A colourful low-rise district between Bugis, Rochor and the city centre.',tip:'Slow down when moving from major roads into compact heritage streets.'},
+    {id:'little-india',name:'Little India',lat:1.3067,lon:103.8517,radius:650,tagline:'Colourful historic streets',text:'A dense district of conserved streets, shops and landmarks north of the city core.',tip:'Singapore road names and direction signs are predominantly in English.'},
+    {id:'toa-payoh',name:'Toa Payoh',lat:1.3344,lon:103.8497,radius:1250,tagline:'Heartland Singapore',text:'One of Singapore’s best-known mature housing towns, with HDB blocks, town-centre roads and neighbourhood streets.',tip:'Heartland driving feels different from downtown: lower-rise, greener and more residential.'},
+    {id:'harbourfront',name:'HarbourFront',lat:1.2653,lon:103.8217,radius:900,tagline:'City meets the southern harbour',text:'The mainland gateway to Sentosa, with port views, malls and the slopes around Mount Faber.',tip:'Southern Singapore is noticeably hillier than the reclaimed downtown waterfront.'},
+    {id:'sentosa',name:'Sentosa',lat:1.2528,lon:103.8305,radius:2100,tagline:'Island resort roads',text:'A greener, lower-speed driving environment separated from the dense city by the harbour.',tip:'This is a leisure island, so the road feel is slower and more landscaped.'},
+    {id:'east-coast',name:'East Coast',lat:1.3075,lon:103.9185,radius:2500,tagline:'Coastal expressway corridor',text:'Longer roads, coastal greenery and the fast east-west run toward Changi.',tip:'Expressways use green direction signs and higher speed limits than city streets.'},
+    {id:'changi',name:'Changi',lat:1.3555,lon:103.9867,radius:1850,tagline:'Singapore’s airport gateway',text:'Wide airport roads, landscaped verges and the distinctive approach to Changi Airport.',tip:'Airport approaches are broad and highly signposted; choose lanes early.'},
+    {id:'jurong-east',name:'Jurong East',lat:1.3331,lon:103.7422,radius:1400,tagline:'West-side regional centre',text:'A dense western town centre surrounded by mature housing and major arterial roads.',tip:'Singapore’s urban form is polycentric: major centres exist well beyond downtown.'},
+    {id:'woodlands',name:'Woodlands',lat:1.4367,lon:103.7862,radius:1400,tagline:'Northern Singapore',text:'A northern regional centre close to the Johor Strait and the Malaysia crossing.',tip:'The island is compact: a city-to-north drive can cross very different neighbourhoods quickly.'}
+  ];
+
+  const GUIDED_DRIVES = [
+    {id:'icons-heritage',name:'Skyline to Orchard',kicker:'BEST FIRST DRIVE',duration:'10–15 min',summary:'Marina Bay, the Civic District, Raffles Hotel and Orchard in one relaxed city drive.',
+      start:{name:'Marina Bay',lat:1.2829,lon:103.8587},finish:{name:'Orchard',lat:1.3048,lon:103.8321},
+      via:[{lat:1.2862,lon:103.8531},{lat:1.2910,lon:103.8520},{lat:1.2947,lon:103.8545}],highlights:['mbs','merlion','fullerton','gallery','raffleshotel','ion']},
+    {id:'heartland',name:'City to Heartland',kicker:'EVERYDAY SINGAPORE',duration:'10–15 min',summary:'Leave the shopping belt and see the transition into mature HDB neighbourhoods.',
+      start:{name:'Orchard',lat:1.3048,lon:103.8321},finish:{name:'Toa Payoh',lat:1.3344,lon:103.8497},
+      via:[{lat:1.3168,lon:103.8437},{lat:1.3270,lon:103.8483}],highlights:['ion','hdbhub']},
+    {id:'southern',name:'CBD to Sentosa',kicker:'SOUTHERN WATERFRONT',duration:'10–15 min',summary:'Skyscrapers, Tanjong Pagar, public housing, harbour roads and the island gateway.',
+      start:{name:'CBD',lat:1.2837,lon:103.8514},finish:{name:'Sentosa',lat:1.2549,lon:103.8238},
+      via:[{lat:1.2768,lon:103.8418},{lat:1.2650,lon:103.8223}],highlights:['ocbc','pinnacle','vivocity']},
+    {id:'airport',name:'City to Changi',kicker:'THE AIRPORT RUN',duration:'20–30 min',summary:'A longer drive that shifts from downtown density to Kallang, the east coast corridor and Changi.',
+      start:{name:'Marina Bay',lat:1.2829,lon:103.8587},finish:{name:'Jewel Changi Airport',lat:1.3602,lon:103.9896},
+      via:[{lat:1.3037,lon:103.8750},{lat:1.3070,lon:103.9150},{lat:1.3370,lon:103.9610}],highlights:['mbs','sportshub','jewel']},
+    {id:'heritage',name:'Heritage Districts',kicker:'OLD & NEW SINGAPORE',duration:'12–18 min',summary:'A compact cross-city drive linking Chinatown, the Civic District, Kampong Glam and Little India.',
+      start:{name:'Chinatown',lat:1.2839,lon:103.8439},finish:{name:'Little India',lat:1.3067,lon:103.8517},
+      via:[{lat:1.2906,lon:103.8516},{lat:1.3023,lon:103.8593}],highlights:['gallery','raffleshotel']}
+  ];
+
+  const LANDMARK_INFO = {
+    mbs:{text:'Marina Bay Sands anchors Singapore’s modern waterfront skyline with its three towers and rooftop skypark.',note:'The surrounding roads sit on reclaimed waterfront land and connect quickly into the CBD.'},
+    merlion:{text:'The Merlion is one of Singapore’s best-known symbols, facing Marina Bay from the historic river mouth.',note:'The Fullerton and Esplanade area is a useful visual reference for finding the Civic District.'},
+    artscience:{text:'The lotus-shaped ArtScience Museum sits beside Marina Bay Sands on the waterfront.',note:'Bayfront roads mix tourist traffic, underground links and broad signalised junctions.'},
+    fullerton:{text:'The Fullerton Hotel occupies the former General Post Office building beside the Singapore River.',note:'You are crossing from the modern bay into the older civic and river districts.'},
+    gallery:{text:'National Gallery Singapore occupies the former Supreme Court and City Hall buildings.',note:'This is Singapore’s Civic District: slower streets, historic buildings and major public spaces.'},
+    raffleshotel:{text:'Raffles Hotel is a historic landmark near Bras Basah and Beach Road.',note:'The city grid changes quickly here between the Civic District, Bugis and Orchard approaches.'},
+    ion:{text:'ION Orchard marks the Orchard Road and Scotts Road junction at the heart of the shopping belt.',note:'Orchard is boulevard driving: frequent lights, multiple lanes and closely spaced destinations.'},
+    hdbhub:{text:'HDB Hub sits in Toa Payoh, one of Singapore’s classic mature public-housing towns.',note:'This is the heartland pattern visitors often miss: HDB blocks, town centres and green neighbourhood roads.'},
+    pinnacle:{text:'The Pinnacle@Duxton is a distinctive high-rise public-housing development near Tanjong Pagar.',note:'It shows how public housing and the CBD can sit almost side by side in Singapore.'},
+    sportshub:{text:'Singapore Sports Hub and the National Stadium form a large landmark beside Kallang Basin.',note:'The eastward drive opens up here before the longer coastal and airport corridors.'},
+    vivocity:{text:'VivoCity is the major HarbourFront mall beside the port and Sentosa gateway.',note:'From here the urban mainland gives way to the greener resort-island road environment.'},
+    jewel:{text:'Jewel Changi Airport is the glass-domed complex linking Changi Airport terminals.',note:'Changi approaches are wide, landscaped and designed around clear airport wayfinding.'},
+    flyer:{text:'The Singapore Flyer sits on the edge of Marina Bay and Kallang Basin.',note:'Its height makes it a useful orientation landmark while driving around the bay.'},
+    helix:{text:'The Helix Bridge is the pedestrian bridge connecting Marina Centre with the Bayfront area.',note:'The road network around it loops around the bay rather than crossing directly.'},
+    ocbc:{text:'OCBC Centre is part of the dense Raffles Place skyline in Singapore’s financial core.',note:'CBD roads are short, signal-heavy and surrounded by tall building canyons.'}
+  };
 
   const LANDMARKS = [
     { name: 'Marina Bay Sands', lat: 1.2834, lon: 103.8607, kind: 'mbs' },
@@ -195,6 +253,24 @@
   let oneMapTileFailures = 0;
   let challenge = makeEmptyChallenge();
   let lastChallengeId = '';
+  let discoveryViewOpen = false;
+  let guidedDrive = null;
+  let guidedDriveCompleted = new Set();
+  let discoverySeenSession = new Set();
+  let discoveryCardTimer = null;
+  let areaRibbonTimer = null;
+  let lastDiscoveryCheck = -Infinity;
+  let currentDiscoveryZoneId = '';
+  let selectedHopPoint = {lat:PRESETS[0].lat,lon:PRESETS[0].lon,name:PRESETS[0].name};
+  let hopMapPaintPending = false;
+  let hopMapZoom = 11;
+  let cameraLookYaw = 0;
+  let cameraLookPitch = 0;
+  let cameraLookActive = false;
+  let cameraLookPointer = null;
+  let cameraLookLast = {x:0,y:0};
+  let activeTerrainPatch = null;
+  const terrainPatchCache = new Map();
   // Driving-dynamics state. We keep the proven scalar forward-speed model but add
   // yaw inertia, lateral tyre slip and transient suspension/camera response around it.
   let lateralSlipMps = 0;
@@ -235,6 +311,30 @@
     challengeSection: document.getElementById('challengeSection'),
     challengeGrid: document.getElementById('challengeGrid'),
     challengeProgressLabel: document.getElementById('challengeProgressLabel'),
+    discoverSingaporeBtn: document.getElementById('discoverSingaporeBtn'),
+    hopMapBtn: document.getElementById('hopMapBtn'),
+    discoverSection: document.getElementById('discoverSection'),
+    discoverBackBtn: document.getElementById('discoverBackBtn'),
+    passportProgress: document.getElementById('passportProgress'),
+    passportBar: document.getElementById('passportBar'),
+    guidedDriveGrid: document.getElementById('guidedDriveGrid'),
+    areaRibbon: document.getElementById('areaRibbon'),
+    areaRibbonEyebrow: document.getElementById('areaRibbonEyebrow'),
+    areaRibbonTitle: document.getElementById('areaRibbonTitle'),
+    areaRibbonText: document.getElementById('areaRibbonText'),
+    discoveryCard: document.getElementById('discoveryCard'),
+    discoveryCardClose: document.getElementById('discoveryCardClose'),
+    discoveryKicker: document.getElementById('discoveryKicker'),
+    discoveryTitle: document.getElementById('discoveryTitle'),
+    discoveryText: document.getElementById('discoveryText'),
+    discoveryDriveNote: document.getElementById('discoveryDriveNote'),
+    hopMapOverlay: document.getElementById('hopMapOverlay'),
+    hopMapCanvas: document.getElementById('hopMapCanvas'),
+    hopMapCloseBtn: document.getElementById('hopMapCloseBtn'),
+    hopMapPlaceName: document.getElementById('hopMapPlaceName'),
+    hopMapCoords: document.getElementById('hopMapCoords'),
+    hopNavigateBtn: document.getElementById('hopNavigateBtn'),
+    hopStartBtn: document.getElementById('hopStartBtn'),
     panelTitle: document.getElementById('panelTitle'),
     panelIntro: document.getElementById('panelIntro'),
     placeEyebrow: document.getElementById('placeEyebrow'),
@@ -314,6 +414,8 @@
     buildPresetButtons();
     buildRecentDestinations();
     buildChallengeButtons();
+    buildGuidedDriveButtons();
+    updatePassportProgress();
     bindUi();
     try{
       miniMapHeadingUp=localStorage.getItem('drivesg-map-heading-up')!=='0';
@@ -321,7 +423,7 @@
       cameraMode=localStorage.getItem('drivesg-camera-mode')||'chase';
     }catch(_){}
     if(!['auto','day','dusk','night'].includes(lightingMode))lightingMode='auto';
-    if(!['chase','hood'].includes(cameraMode))cameraMode='chase';
+    if(!['chase','hood','scenic'].includes(cameraMode))cameraMode='chase';
     els.mapOrientationBtn.textContent=miniMapHeadingUp?'↗':'N';
     updateLightingButton();
     updateCameraButton();
@@ -359,6 +461,7 @@
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFShadowMap;
     els.game.appendChild(renderer.domElement);
+    bindFreeLook(renderer.domElement);
     renderer.domElement.addEventListener('webglcontextlost',e=>{
       e.preventDefault();
       recordDiagnostic('webgl-context-lost','WebGL context lost');
@@ -426,6 +529,7 @@
     shared.tunnel = new THREE.MeshStandardMaterial({ color: 0x32383a, roughness: .96, metalness: 0, side: THREE.DoubleSide });
     shared.water = new THREE.MeshStandardMaterial({ color: 0x527d8d, roughness: 0.72, metalness: 0.03, transparent: true, opacity: 0.93, side: THREE.DoubleSide });
     shared.park = new THREE.MeshStandardMaterial({ color: 0x688268, roughness: 1, metalness: 0, side: THREE.DoubleSide });
+    shared.terrain = new THREE.MeshStandardMaterial({ color: 0x73806c, roughness: 1, metalness: 0, side: THREE.DoubleSide });
     shared.buildings = [
       new THREE.MeshStandardMaterial({ color: 0xc7c0b3, roughness: 0.90, side: THREE.DoubleSide }),
       new THREE.MeshStandardMaterial({ color: 0xb9c3c7, roughness: 0.86, side: THREE.DoubleSide }),
@@ -595,6 +699,7 @@
     setMapState('loading');
     origin = { lat: place.lat, lon: place.lon };
     currentLocationName = place.name || 'Singapore';
+    currentDiscoveryZoneId='';
     els.locationName.textContent = currentLocationName;
     els.placeEyebrow.textContent = 'DRIVING AROUND';
     els.searchMsg.textContent = '';
@@ -608,13 +713,17 @@
     showLoader(`Preparing ${currentLocationName}…`, 5);
 
     try {
-      setProgress(16, 'Fetching nearby Singapore roads…');
+      setProgress(16, 'Reading Singapore roads + terrain…');
       await nextPaint();
-      const data = await fetchOsmData(place.lat, place.lon);
+      const [data,terrain] = await Promise.all([
+        fetchOsmData(place.lat, place.lon),
+        fetchTerrainPatch(place.lat, place.lon)
+      ]);
       if (generation !== streamGeneration) return;
-      setProgress(52, 'Drawing real road and building geometry…');
+      activeTerrainPatch=terrain;
+      setProgress(52, terrain?'Shaping real terrain, roads and buildings…':'Drawing roads and buildings…');
       await nextPaint();
-      const built = buildWorld(data, { centerX: 0, centerZ: 0 });
+      const built = buildWorld(data, { centerX: 0, centerZ: 0 }, terrain);
       if (built.roadCount < 3) throw new Error('Not enough road geometry');
       setProgress(86, `${built.roadCount} roads · ${built.buildingCount} building footprints`);
       swapDynamicWorld(built);
@@ -627,6 +736,7 @@
       setTimeout(hideLoader, 220);
       if (!options.keepPanelOpen) { if(!options.preserveChallenge)setPlaceMode('navigate'); closePanel(); }
       showToast(`${built.roadCount} roads · ${built.buildingCount} real buildings loaded`);
+      maybeShowExperienceHint();
     } catch (err) {
       console.warn('Live road data unavailable. Falling back to bundled Marina Bay demo.', err);
       if (generation !== streamGeneration) return;
@@ -723,6 +833,64 @@
   }
 
 
+
+  async function fetchTerrainPatch(lat,lon){
+    const key=`${Number(lat).toFixed(3)},${Number(lon).toFixed(3)}`;
+    if(terrainPatchCache.has(key))return terrainPatchCache.get(key);
+    const half=TERRAIN_SPAN_METERS/2,size=TERRAIN_GRID_SIZE,lats=[],lons=[];
+    for(let j=0;j<size;j++){
+      const z=-half+(TERRAIN_SPAN_METERS*j/(size-1));
+      for(let i=0;i<size;i++){
+        const x=-half+(TERRAIN_SPAN_METERS*i/(size-1));
+        lats.push(lat-z/110540);
+        lons.push(lon+x/(111320*Math.cos(lat*Math.PI/180)));
+      }
+    }
+    const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),7000);
+    try{
+      const url=`${ELEVATION_ENDPOINT}?latitude=${lats.map(v=>v.toFixed(6)).join(',')}&longitude=${lons.map(v=>v.toFixed(6)).join(',')}`;
+      const res=await fetch(url,{headers:{Accept:'application/json'},signal:controller.signal});
+      if(!res.ok)throw new Error(`Elevation ${res.status}`);
+      const data=await res.json(),values=Array.isArray(data?.elevation)?data.elevation.map(v=>Number(v)):null;
+      if(!values||values.length!==size*size)throw new Error('Elevation grid incomplete');
+      const center=project(lat,lon);
+      // Clamp small below-sea artefacts. Singapore's playable road/land world is effectively above sea level,
+      // while water polygons remain rendered at y≈0.
+      const patch={key,centerX:center.x,centerZ:center.z,span:TERRAIN_SPAN_METERS,size,values:values.map(v=>Number.isFinite(v)?Math.max(0,v):0)};
+      terrainPatchCache.set(key,patch);
+      while(terrainPatchCache.size>8)terrainPatchCache.delete(terrainPatchCache.keys().next().value);
+      return patch;
+    }catch(err){
+      console.warn('Terrain elevation unavailable; using flat fallback.',err?.message||err);
+      return null;
+    }finally{clearTimeout(timer);}
+  }
+
+  function terrainHeightAt(x,z,patch=activeTerrainPatch){
+    if(!patch?.values?.length)return 0;
+    const half=patch.span/2,n=patch.size-1;
+    let u=(x-patch.centerX+half)/patch.span*n,v=(z-patch.centerZ+half)/patch.span*n;
+    if(u<-.3||v<-.3||u>n+.3||v>n+.3)return 0;
+    u=THREE.MathUtils.clamp(u,0,n);v=THREE.MathUtils.clamp(v,0,n);
+    const x0=Math.floor(u),x1=Math.min(n,x0+1),z0=Math.floor(v),z1=Math.min(n,z0+1),tx=u-x0,tz=v-z0;
+    const at=(xx,zz)=>patch.values[zz*patch.size+xx]||0;
+    const a=THREE.MathUtils.lerp(at(x0,z0),at(x1,z0),tx),b=THREE.MathUtils.lerp(at(x0,z1),at(x1,z1),tx);
+    return THREE.MathUtils.lerp(a,b,tz);
+  }
+
+  function buildTerrainMesh(centerX,centerZ,patch){
+    if(!patch)return null;
+    const span=Math.min(patch.span,3500),half=span/2,steps=24,verts=[];
+    for(let j=0;j<steps;j++)for(let i=0;i<steps;i++){
+      const x0=centerX-half+span*i/steps,x1=centerX-half+span*(i+1)/steps;
+      const z0=centerZ-half+span*j/steps,z1=centerZ-half+span*(j+1)/steps;
+      const a=[x0,terrainHeightAt(x0,z0,patch)-.12,z0],b=[x1,terrainHeightAt(x1,z0,patch)-.12,z0],
+            c=[x1,terrainHeightAt(x1,z1,patch)-.12,z1],d=[x0,terrainHeightAt(x0,z1,patch)-.12,z1];
+      pushTri(verts,a,b,c);pushTri(verts,a,c,d);
+    }
+    const mesh=meshFromFlatVertices(verts,shared.terrain,true);mesh.renderOrder=0;mesh.userData.qualityLayer='terrain';return mesh;
+  }
+
   function makeEmptyNavigation() {
     return {
       active:false, mode:'idle', fetching:false, destination:null,
@@ -739,6 +907,7 @@
 
   async function navigateTo(place, options={}) {
     if(challenge.active&&!options.challengeRoute)cancelChallenge({quiet:true,keepNavigation:true});
+    if(guidedDrive?.active&&!options.guidedDrive)cancelGuidedDrive({quiet:true});
     if(!place || !insideSingapore(Number(place.lat),Number(place.lon))) {
       showToast('Choose a destination inside Singapore');
       return;
@@ -756,10 +925,10 @@
     saveActiveDestination(navigation.destination);
     buildRecentDestinations();
     closePanel();
-    await requestNavigationRoute(start,navigation.destination,{reroute:false,quiet:options.quiet});
+    await requestNavigationRoute(start,navigation.destination,{reroute:false,quiet:options.quiet,via:Array.isArray(options.via)?options.via:[]});
   }
 
-  async function requestNavigationRoute(start,destination,{reroute=false,quiet=false}={}) {
+  async function requestNavigationRoute(start,destination,{reroute=false,quiet=false,via=[]}={}) {
     if(!destination)return;
     navigation.fetching=true;
     navigation.active=true;
@@ -779,14 +948,19 @@
     const timeoutId=setTimeout(()=>controller.abort(),12000);
     try{
       let res=null;
-      if(BACKEND_ACTIVE){
+      const validVia=(Array.isArray(via)?via:[]).filter(p=>p&&insideSingapore(Number(p.lat),Number(p.lon))).map(p=>({lat:Number(p.lat),lon:Number(p.lon)}));
+      // Guided drives use a few deliberate waypoints so the journey passes the places
+      // a visitor should actually experience. The public OSRM endpoint accepts multi-point
+      // routes directly; normal two-point navigation still prefers our cached backend.
+      if(!validVia.length&&BACKEND_ACTIVE){
         try{
           const path=`/api/route?startLat=${encodeURIComponent(start.lat)}&startLon=${encodeURIComponent(start.lon)}&endLat=${encodeURIComponent(destination.lat)}&endLon=${encodeURIComponent(destination.lon)}`;
           res=await backendFetch(path,{headers:{Accept:'application/json'},signal:controller.signal});
         }catch(err){console.warn('DriveSG route backend bypass',err?.message||err);}
       }
       if(!res||!res.ok){
-        const fallback=`${ROUTE_ENDPOINT}/${start.lon},${start.lat};${destination.lon},${destination.lat}?steps=true&geometries=geojson&overview=full&alternatives=false`;
+        const coords=[start,...validVia,destination].map(p=>`${p.lon},${p.lat}`).join(';');
+        const fallback=`${ROUTE_ENDPOINT}/${coords}?steps=true&geometries=geojson&overview=full&alternatives=false`;
         res=await fetch(fallback,{headers:{Accept:'application/json'},signal:controller.signal});
       }
       if(!res.ok)throw new Error(`Routing ${res.status}`);
@@ -980,7 +1154,7 @@
 
       if(hit.distance>ROUTE_OFFTRACK_METERS&&!navigation.fetching&&elapsed-navigation.lastRerouteAt>ROUTE_REROUTE_COOLDOWN){
         navigation.lastRerouteAt=elapsed;
-        requestNavigationRoute(carCoords,navigation.destination,{reroute:true,quiet:true});
+        requestNavigationRoute(carCoords,navigation.destination,{reroute:true,quiet:true,via:guidedRemainingVia()});
       }
     }else{
       navigation.remainingM=directToDest;
@@ -1029,6 +1203,7 @@
     navigation.arrived=true;
     navigation.active=false;
     const completedChallenge=finishChallenge();
+    const completedGuide=finishGuidedDrive();
     currentLocationName=navigation.destination.name;
     savePlace({name:currentLocationName,subtitle:'Last destination',lat:navigation.destination.lat,lon:navigation.destination.lon});
     clearActiveDestination();
@@ -1040,8 +1215,9 @@
     els.navRemaining.textContent='ARRIVED';
     els.navEta.textContent='';
     els.placeEyebrow.textContent='ARRIVED';
-    if(!completedChallenge)setTimeout(()=>{if(navigation.arrived)clearNavigation({quiet:true});},5000);
-    if(!completedChallenge)showToast(`Arrived at ${navigation.destination.name}`);
+    if(!completedChallenge&&!completedGuide)setTimeout(()=>{if(navigation.arrived)clearNavigation({quiet:true});},5000);
+    if(!completedChallenge&&!completedGuide)showToast(`Arrived at ${navigation.destination.name}`);
+    if(completedGuide)setTimeout(()=>{if(navigation.arrived)clearNavigation({quiet:true});},9000);
   }
 
   function routeProgressForPoint(x,z,forceFull=false) {
@@ -1127,6 +1303,8 @@
 
   function setPlaceMode(mode) {
     placeMode=mode==='start'?'start':(mode==='challenge'?'challenge':'navigate');
+    discoveryViewOpen=false;
+    els.discoverSection?.classList.add('hidden');
     const nav=placeMode==='navigate',startHere=placeMode==='start',challengeView=placeMode==='challenge';
     els.navigateModeBtn.classList.toggle('active',nav);
     els.startModeBtn.classList.toggle('active',startHere);
@@ -1356,6 +1534,280 @@
     if(def)startChallenge(def);
   }
 
+
+  function readDiscoveryPassport(){
+    try{
+      const raw=JSON.parse(localStorage.getItem('drivesg-singapore-passport-v1')||'{}');
+      return raw&&typeof raw==='object'?raw:{};
+    }catch(_){return {};}
+  }
+
+  function writeDiscoveryPassport(data){
+    try{localStorage.setItem('drivesg-singapore-passport-v1',JSON.stringify(data));}catch(_){}
+  }
+
+  function discoveryTotalCount(){
+    return DISCOVERY_ZONES.length+Object.keys(LANDMARK_INFO).length;
+  }
+
+  function updatePassportProgress(){
+    const passport=readDiscoveryPassport(),count=Object.keys(passport).filter(k=>passport[k]).length,total=discoveryTotalCount();
+    if(els.passportProgress)els.passportProgress.textContent=`${Math.min(count,total)} / ${total} places discovered`;
+    if(els.passportBar)els.passportBar.style.width=`${Math.min(100,total?count/total*100:0)}%`;
+    return {count,total};
+  }
+
+  function markDiscovered(key){
+    if(!key)return false;
+    const passport=readDiscoveryPassport();
+    const fresh=!passport[key];
+    passport[key]={at:Date.now()};
+    writeDiscoveryPassport(passport);
+    if(fresh)updatePassportProgress();
+    return fresh;
+  }
+
+  function buildGuidedDriveButtons(){
+    if(!els.guidedDriveGrid)return;
+    const completed=readGuidedDriveCompleted();
+    els.guidedDriveGrid.innerHTML='';
+    for(const def of GUIDED_DRIVES){
+      const btn=document.createElement('button');btn.type='button';btn.className='guided-drive'+(completed.has(def.id)?' completed':'');
+      btn.innerHTML=`<span class="gd-kicker">${escapeHtml(def.kicker)}<i>${completed.has(def.id)?'✓ DRIVEN':escapeHtml(def.duration)}</i></span><strong>${escapeHtml(def.name)}</strong><p>${escapeHtml(def.summary)}</p><small>${escapeHtml(def.start.name)} → ${escapeHtml(def.finish.name)}</small>`;
+      btn.addEventListener('click',()=>startGuidedDrive(def));
+      els.guidedDriveGrid.appendChild(btn);
+    }
+  }
+
+  function readGuidedDriveCompleted(){
+    try{
+      const arr=JSON.parse(localStorage.getItem('drivesg-guided-drives-v1')||'[]');
+      return new Set(Array.isArray(arr)?arr:[]);
+    }catch(_){return new Set();}
+  }
+
+  function writeGuidedDriveCompleted(set){
+    try{localStorage.setItem('drivesg-guided-drives-v1',JSON.stringify([...set]));}catch(_){}
+  }
+
+  function openDiscoverView(){
+    discoveryViewOpen=true;
+    els.placePicker?.classList.add('hidden');
+    els.challengeSection?.classList.add('hidden');
+    els.discoverSection?.classList.remove('hidden');
+    if(els.panelTitle)els.panelTitle.textContent='Discover Singapore';
+    if(els.panelIntro)els.panelIntro.textContent='Relaxed guided drives for seeing how Singapore changes from district to district.';
+    buildGuidedDriveButtons();
+    updatePassportProgress();
+  }
+
+  function closeDiscoverView(){
+    discoveryViewOpen=false;
+    els.discoverSection?.classList.add('hidden');
+    if(placeMode==='challenge'){els.challengeSection?.classList.remove('hidden');}
+    else{els.placePicker?.classList.remove('hidden');}
+    setPlaceMode(placeMode);
+  }
+
+  async function startGuidedDrive(def){
+    if(!def)return;
+    guidedDrive={active:true,def,startedAt:Date.now(),highlightSeen:new Set(),viaPassed:new Set(),arrival:false};
+    closeDiscoverView();
+    setPanelOpen(false);
+    showLoader(`Starting ${def.name}…`,5);
+    await loadLocation({...def.start,subtitle:def.kicker},{preserveGuidedDrive:true});
+    if(!guidedDrive?.active||guidedDrive.def?.id!==def.id)return;
+    await navigateTo({...def.finish,subtitle:def.kicker},{quiet:true,guidedDrive:true,via:def.via||[]});
+    if(guidedDrive?.active){
+      showDiscoveryCard('GUIDED DRIVE',def.name,def.summary,`${def.duration} · Drive normally — this is not a race.`,9000);
+      showToast(`Discover drive · ${def.start.name} → ${def.finish.name}`);
+    }
+  }
+
+  function finishGuidedDrive(){
+    if(!guidedDrive?.active||guidedDrive.arrival)return false;
+    guidedDrive.arrival=true;
+    const completed=readGuidedDriveCompleted();completed.add(guidedDrive.def.id);writeGuidedDriveCompleted(completed);
+    buildGuidedDriveButtons();
+    showDiscoveryCard('DRIVE COMPLETE',guidedDrive.def.name,'You reached the end of this Singapore discovery drive. Your passport keeps every district and landmark you passed.',`${guidedDrive.highlightSeen.size} featured landmark${guidedDrive.highlightSeen.size===1?'':'s'} noticed on this drive.`,10000);
+    guidedDrive.active=false;
+    return true;
+  }
+
+  function cancelGuidedDrive({quiet=false}={}){
+    if(!guidedDrive?.active)return;
+    guidedDrive=null;
+    if(!quiet)showToast('Guided drive ended');
+  }
+
+  function showAreaRibbon(zone){
+    if(!zone||!els.areaRibbon)return;
+    clearTimeout(areaRibbonTimer);
+    els.areaRibbonEyebrow.textContent='YOU’RE ENTERING';
+    els.areaRibbonTitle.textContent=zone.name;
+    els.areaRibbonText.textContent=zone.tagline;
+    els.areaRibbon.classList.add('show');
+    areaRibbonTimer=setTimeout(()=>els.areaRibbon?.classList.remove('show'),5200);
+  }
+
+  function showDiscoveryCard(kicker,title,text,note,duration=7600){
+    if(!els.discoveryCard)return;
+    clearTimeout(discoveryCardTimer);
+    els.discoveryKicker.textContent=kicker||'DISCOVERED';
+    els.discoveryTitle.textContent=title||'Singapore';
+    els.discoveryText.textContent=text||'';
+    els.discoveryDriveNote.textContent=note||'';
+    els.discoveryCard.classList.add('show');
+    discoveryCardTimer=setTimeout(()=>els.discoveryCard?.classList.remove('show'),duration);
+  }
+
+  function dismissDiscoveryCard(){
+    clearTimeout(discoveryCardTimer);els.discoveryCard?.classList.remove('show');
+  }
+
+  function nearestDiscoveryZone(lat,lon){
+    let best=null,bestD=Infinity;
+    for(const zone of DISCOVERY_ZONES){
+      const d=haversineMeters(lat,lon,zone.lat,zone.lon);
+      if(d<zone.radius&&d<bestD){best=zone;bestD=d;}
+    }
+    return best?{zone:best,distance:bestD}:null;
+  }
+
+  function nearestNamedArea(lat,lon){
+    const z=nearestDiscoveryZone(lat,lon);
+    if(z)return z.zone.name;
+    let best=null,bestD=Infinity;
+    for(const p of PRESETS){
+      const d=haversineMeters(lat,lon,p.lat,p.lon);if(d<bestD){best=p;bestD=d;}
+    }
+    return bestD<6500?`Near ${best.name}`:'Singapore';
+  }
+
+  function guidedRemainingVia(){
+    if(!guidedDrive?.active)return [];
+    const via=guidedDrive.def?.via||[];
+    return via.filter((_,i)=>!guidedDrive.viaPassed?.has(i));
+  }
+
+  function updateDiscoveryExperience(elapsed){
+    if(!car||elapsed-lastDiscoveryCheck<.85)return;
+    lastDiscoveryCheck=elapsed;
+    const c=currentCarCoords();
+    if(guidedDrive?.active){
+      (guidedDrive.def?.via||[]).forEach((v,i)=>{
+        if(!guidedDrive.viaPassed?.has(i)&&haversineMeters(c.lat,c.lon,v.lat,v.lon)<190)guidedDrive.viaPassed.add(i);
+      });
+    }
+    const zoneHit=nearestDiscoveryZone(c.lat,c.lon);
+    if(zoneHit?.zone?.id!==currentDiscoveryZoneId){
+      currentDiscoveryZoneId=zoneHit?.zone?.id||'';
+      if(zoneHit){
+        const zone=zoneHit.zone,fresh=markDiscovered(`zone:${zone.id}`);
+        showAreaRibbon(zone);
+        if(fresh&&!guidedDrive?.active)showDiscoveryCard('NEW AREA',zone.name,zone.text,zone.tip,7200);
+      }
+    }
+
+    for(const lm of LANDMARKS){
+      const info=LANDMARK_INFO[lm.kind];if(!info)continue;
+      const d=haversineMeters(c.lat,c.lon,lm.lat,lm.lon);
+      if(d>220)continue;
+      const key=`landmark:${lm.kind}`;
+      if(discoverySeenSession.has(key))continue;
+      discoverySeenSession.add(key);
+      const fresh=markDiscovered(key);
+      if(guidedDrive?.active&&guidedDrive.def?.highlights?.includes(lm.kind))guidedDrive.highlightSeen.add(lm.kind);
+      showDiscoveryCard(fresh?'LANDMARK DISCOVERED':'YOU’RE PASSING',lm.name,info.text,info.note,8200);
+      break;
+    }
+  }
+
+  function ensureHopMapResolution(){
+    const c=els.hopMapCanvas;if(!c)return;
+    const rect=c.getBoundingClientRect(),ratio=Math.min(window.devicePixelRatio||1,2);
+    const w=Math.max(700,Math.round(rect.width*ratio)),h=Math.max(360,Math.round(rect.height*ratio));
+    if(c.width!==w||c.height!==h){c.width=w;c.height=h;}
+  }
+
+  function inverseMercatorGlobalPixel(x,y,zoom){
+    const n=Math.pow(2,zoom)*ONEMAP_TILE_SIZE;
+    const lon=x/n*360-180;
+    const yy=.5-y/n;
+    const lat=90-360*Math.atan(Math.exp(-yy*2*Math.PI))/Math.PI;
+    return {lat,lon};
+  }
+
+  function oneMapTileStyle(){
+    return lightingNightFactor>.55||lightingMode==='night'?'night':'day';
+  }
+
+  function openHopMap(){
+    selectedHopPoint=currentCarCoords();
+    selectedHopPoint={...selectedHopPoint,name:nearestNamedArea(selectedHopPoint.lat,selectedHopPoint.lon)};
+    els.hopMapOverlay?.classList.add('show');document.body.classList.add('hop-map-open');clearInputs();
+    updateHopMapSelection();requestAnimationFrame(()=>{ensureHopMapResolution();paintHopMap();});
+  }
+
+  function closeHopMap(){
+    els.hopMapOverlay?.classList.remove('show');document.body.classList.remove('hop-map-open');clearInputs();
+  }
+
+  function updateHopMapSelection(){
+    if(!selectedHopPoint)return;
+    if(els.hopMapPlaceName)els.hopMapPlaceName.textContent=selectedHopPoint.name||nearestNamedArea(selectedHopPoint.lat,selectedHopPoint.lon);
+    if(els.hopMapCoords)els.hopMapCoords.textContent=`${selectedHopPoint.lat.toFixed(4)}, ${selectedHopPoint.lon.toFixed(4)}`;
+  }
+
+  function paintHopMap(){
+    if(!els.hopMapOverlay?.classList.contains('show')||!els.hopMapCanvas)return;
+    ensureHopMapResolution();
+    const c=els.hopMapCanvas,ctx=c.getContext('2d'),w=c.width,h=c.height;
+    const center={lat:1.3521,lon:103.8198},zoom=hopMapZoom,gp=mercatorGlobalPixel(center.lat,center.lon,zoom);
+    ctx.clearRect(0,0,w,h);ctx.fillStyle='#102126';ctx.fillRect(0,0,w,h);
+    const tx0=Math.floor((gp.x-w/2)/ONEMAP_TILE_SIZE)-1,tx1=Math.ceil((gp.x+w/2)/ONEMAP_TILE_SIZE)+1;
+    const ty0=Math.floor((gp.y-h/2)/ONEMAP_TILE_SIZE)-1,ty1=Math.ceil((gp.y+h/2)/ONEMAP_TILE_SIZE)+1;
+    let drawn=0;
+    for(let ty=ty0;ty<=ty1;ty++)for(let tx=tx0;tx<=tx1;tx++){
+      const entry=requestOneMapTile(zoom,tx,ty);if(!entry?.ready)continue;
+      const dx=tx*ONEMAP_TILE_SIZE-gp.x+w/2,dy=ty*ONEMAP_TILE_SIZE-gp.y+h/2;
+      try{ctx.drawImage(entry.img,dx,dy,ONEMAP_TILE_SIZE+.5,ONEMAP_TILE_SIZE+.5);drawn++;}catch(_){}
+    }
+    ctx.fillStyle=drawn?'rgba(3,10,13,.10)':'rgba(5,12,15,.2)';ctx.fillRect(0,0,w,h);
+    const toScreen=(lat,lon)=>{const q=mercatorGlobalPixel(lat,lon,zoom);return{x:q.x-gp.x+w/2,y:q.y-gp.y+h/2};};
+    for(const zone of DISCOVERY_ZONES){
+      const q=toScreen(zone.lat,zone.lon);if(q.x<-20||q.x>w+20||q.y<-20||q.y>h+20)continue;
+      ctx.beginPath();ctx.arc(q.x,q.y,4.6,0,Math.PI*2);ctx.fillStyle='rgba(126,230,199,.88)';ctx.fill();
+      if(w>1000){ctx.font='700 14px -apple-system,BlinkMacSystemFont,Arial';ctx.fillStyle='rgba(255,255,255,.72)';ctx.fillText(zone.name,q.x+8,q.y+4);}
+    }
+    const here=currentCarCoords(),hq=toScreen(here.lat,here.lon);
+    ctx.beginPath();ctx.arc(hq.x,hq.y,7,0,Math.PI*2);ctx.fillStyle='#fff';ctx.fill();ctx.lineWidth=3;ctx.strokeStyle='#102126';ctx.stroke();
+    if(selectedHopPoint){
+      const q=toScreen(selectedHopPoint.lat,selectedHopPoint.lon);
+      ctx.beginPath();ctx.arc(q.x,q.y,10,0,Math.PI*2);ctx.fillStyle='#7ee6c7';ctx.fill();ctx.lineWidth=4;ctx.strokeStyle='rgba(6,15,18,.9)';ctx.stroke();
+      ctx.beginPath();ctx.arc(q.x,q.y,17,0,Math.PI*2);ctx.strokeStyle='rgba(126,230,199,.42)';ctx.lineWidth=2;ctx.stroke();
+    }
+  }
+
+  function handleHopMapTap(e){
+    const c=els.hopMapCanvas;if(!c)return;
+    const rect=c.getBoundingClientRect(),ratioX=c.width/rect.width,ratioY=c.height/rect.height;
+    const px=(e.clientX-rect.left)*ratioX,py=(e.clientY-rect.top)*ratioY;
+    const center={lat:1.3521,lon:103.8198},gp=mercatorGlobalPixel(center.lat,center.lon,hopMapZoom);
+    const q=inverseMercatorGlobalPixel(gp.x+(px-c.width/2),gp.y+(py-c.height/2),hopMapZoom);
+    if(!insideSingapore(q.lat,q.lon)){showToast('Choose a point on Singapore island');return;}
+    selectedHopPoint={lat:q.lat,lon:q.lon,name:nearestNamedArea(q.lat,q.lon)};
+    updateHopMapSelection();paintHopMap();
+  }
+
+  async function hopMapNavigate(){
+    if(!selectedHopPoint)return;const p={...selectedHopPoint,subtitle:'Selected on Singapore map'};closeHopMap();await navigateTo(p);
+  }
+
+  async function hopMapStart(){
+    if(!selectedHopPoint)return;const p={...selectedHopPoint,subtitle:'Selected on Singapore map'};closeHopMap();await loadLocation(p);
+  }
+
   function ensureMiniMapResolution() {
     const c=els.miniMapCanvas;if(!c)return;
     const rect=c.getBoundingClientRect(),ratio=Math.min(window.devicePixelRatio||1,2);
@@ -1386,14 +1838,14 @@
   function requestOneMapTile(z,x,y){
     const n=Math.pow(2,z),tx=((x%n)+n)%n;
     if(y<0||y>=n)return null;
-    const key=`${z}/${tx}/${y}`;
+    const style=oneMapTileStyle(),key=`${style}:${z}/${tx}/${y}`;
     const cached=oneMapTileCache.get(key);if(cached)return cached;
     const img=new Image();
-    const entry={img,ready:false,failed:false,lastUsed:performance.now()};oneMapTileCache.set(key,entry);
+    const entry={img,ready:false,failed:false,lastUsed:performance.now(),style};oneMapTileCache.set(key,entry);
     img.decoding='async';
-    img.onload=()=>{entry.ready=true;entry.failed=false;lastMiniMapPaint=-Infinity;};
+    img.onload=()=>{entry.ready=true;entry.failed=false;lastMiniMapPaint=-Infinity;if(els.hopMapOverlay?.classList.contains('show')&&!hopMapPaintPending){hopMapPaintPending=true;requestAnimationFrame(()=>{hopMapPaintPending=false;paintHopMap();});}};
     img.onerror=()=>{entry.failed=true;entry.ready=false;oneMapTileFailures++;if(oneMapTileFailures>18)oneMapTilesEnabled=false;};
-    img.src=`${ONEMAP_TILE_BASE}/${z}/${tx}/${y}.png`;
+    img.src=`${ONEMAP_TILE_BASES[style]}/${z}/${tx}/${y}.png`;
     while(oneMapTileCache.size>oneMapTileCacheLimit()){
       const oldest=oneMapTileCache.keys().next().value;oneMapTileCache.delete(oldest);
     }
@@ -2255,17 +2707,23 @@
 
   function updateCameraButton(){
     if(!els.cameraBtn)return;
-    els.cameraBtn.textContent=cameraMode==='hood'?'▣':'◉';
-    els.cameraBtn.title=`Camera: ${cameraMode==='hood'?'Hood':'Chase'}`;
-    els.cameraBtn.setAttribute('aria-label',`Change driving camera. Current: ${cameraMode==='hood'?'hood':'chase'}`);
+    const meta={
+      chase:{icon:'◉',label:'Chase'},
+      hood:{icon:'▣',label:'Hood'},
+      scenic:{icon:'◇',label:'Scenic'}
+    }[cameraMode]||{icon:'◉',label:'Chase'};
+    els.cameraBtn.textContent=meta.icon;
+    els.cameraBtn.title=`Camera: ${meta.label}`;
+    els.cameraBtn.setAttribute('aria-label',`Change driving camera. Current: ${meta.label.toLowerCase()}`);
   }
 
   function cycleCameraMode(){
-    cameraMode=cameraMode==='chase'?'hood':'chase';
+    cameraMode=cameraMode==='chase'?'hood':(cameraMode==='hood'?'scenic':'chase');
     try{localStorage.setItem('drivesg-camera-mode',cameraMode);}catch(_){}
     updateCameraButton();
     cameraShake=Math.max(cameraShake,.08);
-    showToast(cameraMode==='hood'?'Hood camera · closer road view':'Chase camera');
+    const label=cameraMode==='hood'?'Hood camera · closer road view':(cameraMode==='scenic'?'Scenic camera · see more of Singapore':'Chase camera');
+    showToast(label);
   }
 
   function resetDrivingDynamics(){
@@ -2287,11 +2745,13 @@
     els.tcsIndicator?.classList.toggle('active',tcsActive);
   }
 
-  function buildWorld(data, center = {}) {
+  function buildWorld(data, center = {}, terrainPatch = activeTerrainPatch) {
     const centerX = Number.isFinite(center.x) ? center.x : (Number.isFinite(center.centerX) ? center.centerX : 0);
     const centerZ = Number.isFinite(center.z) ? center.z : (Number.isFinite(center.centerZ) ? center.centerZ : 0);
     const normalizedCenter = { x: centerX, z: centerZ };
     const group = new THREE.Group();
+    const terrainMesh=buildTerrainMesh(centerX,centerZ,terrainPatch);
+    if(terrainMesh)group.add(terrainMesh);
     const segments = [];
     const sidewalkVerts = [];
     const edgeVerts = [];
@@ -2338,19 +2798,24 @@
         const oneway=tags.oneway||(tags.junction==='roundabout'?'yes':'');
         const isBridge=roadIsBridge(tags);
         const isTunnel=roadIsTunnel(tags);
-        const points = cleanPolyline(el.geometry.map(p => ({...project(p.lat, p.lon), y:roadY})));
+        const points = cleanPolyline(el.geometry.map(q => {
+          const p=project(q.lat,q.lon);
+          return {...p,y:terrainHeightAt(p.x,p.z,terrainPatch)+roadY};
+        }));
         if (points.length < 2) continue;
         if(isBridge&&points.length>=3){
           const layer=parseRoadLayer(tags.layer),approachY=Math.max(0,(layer-1)*3.35);
-          points[0].y=approachY;points[points.length-1].y=approachY;
+          points[0].y=terrainHeightAt(points[0].x,points[0].z,terrainPatch)+approachY;
+          points[points.length-1].y=terrainHeightAt(points[points.length-1].x,points[points.length-1].z,terrainPatch)+approachY;
         }
 
-        // Pavement/shoulder first, then curb/edge, then asphalt. This produces a continuous
-        // readable street section without creating a mesh for every road segment.
-        if(!/motorway/.test(type)) appendRoadRibbon(sidewalkVerts, points, width + (major ? 3.3 : 4.8), roadY + .006, true);
-        appendRoadRibbon(edgeVerts, points, width + (major ? 1.7 : 2.15), roadY + .019, true);
-        appendRoadRibbon(major ? majorVerts : roadVerts, points, width, roadY + .043, true);
-        if(lanes>=4&&!/^(yes|1|-1)$/.test(String(oneway))&&!isTunnel) appendRoadRibbon(medianVerts,points,Math.min(1.35,width*.09),roadY+.072,false);
+        // Pavement/shoulder first, then curb/edge, then asphalt. Terrain height is carried
+        // by every road point so sloped Singapore roads remain continuously drivable.
+        const y0=points[0].y||0;
+        if(!/motorway/.test(type)) appendRoadRibbon(sidewalkVerts, points, width + (major ? 3.3 : 4.8), y0 + .006, true);
+        appendRoadRibbon(edgeVerts, points, width + (major ? 1.7 : 2.15), y0 + .019, true);
+        appendRoadRibbon(major ? majorVerts : roadVerts, points, width, y0 + .043, true);
+        if(lanes>=4&&!/^(yes|1|-1)$/.test(String(oneway))&&!isTunnel) appendRoadRibbon(medianVerts,points,Math.min(1.35,width*.09),y0+.072,false);
 
         const waySegments = [];
         const nodeIds=Array.isArray(el.nodes)?el.nodes:[];
@@ -2385,14 +2850,16 @@
         appendWayLaneMarkings(lineVerts, waySegments, width, lanes, oneway);
         roadCount++;
       } else if (tags.building || tags['building:part']) {
-        const b = buildingDescriptor(el, normalizedCenter);
+        const b = buildingDescriptor(el, normalizedCenter, terrainPatch);
         if (b) buildingDescriptors.push(b);
       } else if (isWaterFeature(tags)) {
         const pts = cleanPolygon(el.geometry.map(p => project(p.lat, p.lon)));
-        if (appendFlatPolygon(waterVerts, pts, 0.004)) { waterCount++; waterPolygons.push(pts); }
+        const wy=pts.length?pts.reduce((sum,p)=>sum+terrainHeightAt(p.x,p.z,terrainPatch),0)/pts.length:0;
+        if (appendFlatPolygon(waterVerts, pts, wy+0.004)) { waterCount++; waterPolygons.push(pts); }
       } else if (isParkFeature(tags)) {
         const pts = cleanPolygon(el.geometry.map(p => project(p.lat, p.lon)));
-        if (appendFlatPolygon(parkVerts, pts, -0.002)) { parkCount++; parkPolygons.push(pts); }
+        const py=pts.length?pts.reduce((sum,p)=>sum+terrainHeightAt(p.x,p.z,terrainPatch),0)/pts.length:0;
+        if (appendFlatPolygon(parkVerts, pts, py+.012)) { parkCount++; parkPolygons.push(pts); }
       }
     }
 
@@ -2451,15 +2918,16 @@
     const streetLightCount=addStreetLights(group,segments,centerX,centerZ,selectedBuildings);
     const gantryCount=addRoadGantries(group,segments,centerX,centerZ);
     const roadSignCount=addRoadNameSigns(group,segments,centerX,centerZ);
-    const treeCount = addRoadsideTrees(group, segments, centerX, centerZ, selectedBuildings);
-    const tropicalPlantCount=addTropicalVegetation(group,segments,parkPolygons,waterPolygons,centerX,centerZ,selectedBuildings);
-    addLandmarksTo(group,centerX,centerZ);
+    const treeCount = addRoadsideTrees(group, segments, centerX, centerZ, selectedBuildings, terrainPatch);
+    const tropicalPlantCount=addTropicalVegetation(group,segments,parkPolygons,waterPolygons,centerX,centerZ,selectedBuildings,terrainPatch);
+    addLandmarksTo(group,centerX,centerZ,terrainPatch);
     return {
       group, segments, roadGraph:roadGraphBuilt, signalDescriptors, busStopDescriptors, signalVisuals:signalBuild.visuals, roadCount,
       buildingCount: selectedBuildings.length,
       buildingColliders: selectedBuildings,
       waterPolygons, parkPolygons,
-      treeCount, tropicalPlantCount, streetLightCount, gantryCount, roadSignCount, junctionMarkingCount, waterCount, parkCount, trafficSignalCount, crossingCount, busStopCount
+      treeCount, tropicalPlantCount, streetLightCount, gantryCount, roadSignCount, junctionMarkingCount, waterCount, parkCount, trafficSignalCount, crossingCount, busStopCount,
+      terrainPatch
     };
   }
 
@@ -2633,10 +3101,11 @@
           pushTri(windowOut,l,r,rt);pushTri(windowOut,l,rt,lt);budget.count++;
         }
       }
-      if(commercial&&b.minHeight<1&&b.distance<300){
+      const relMin=b.minHeight-(b.groundY||0),groundY=b.groundY||0;
+      if(commercial&&relMin<1&&b.distance<300){
         const cols2=Math.min(8,Math.max(1,Math.floor(len/5.2)));
         for(let col=0;col<cols2;col++){
-          const t=(col+.5)/cols2,cx=a.x+dx*t+nx*.052,cz=a.z+dz*t+nz*.052,hw=Math.min(2.0,len/cols2*.38),cy=1.75,hh=1.45;
+          const t=(col+.5)/cols2,cx=a.x+dx*t+nx*.052,cz=a.z+dz*t+nz*.052,hw=Math.min(2.0,len/cols2*.38),cy=groundY+1.75,hh=1.45;
           const l=[cx-ux*hw,cy-hh,cz-uz*hw],r=[cx+ux*hw,cy-hh,cz+uz*hw],rt=[cx+ux*hw,cy+hh,cz+uz*hw],lt=[cx-ux*hw,cy+hh,cz-uz*hw];
           pushTri(storeOut,l,r,rt);pushTri(storeOut,l,rt,lt);
         }
@@ -2647,7 +3116,7 @@
 
   function appendBuildingIdentityDetails(hdbOut,officeOut,awningOut,b,budget){
     if(!b?.pts?.length||b.distance>430||budget.count>=MAX_FACADE_DETAILS)return;
-    const cls=b.visualClass||'generic',height=b.wallTop-b.minHeight;
+    const cls=b.visualClass||'generic',height=b.wallTop-b.minHeight,groundY=b.groundY||0,relMin=b.minHeight-(b.groundY||0);
     if(height<6)return;
     const areaSign=polygonArea(b.pts)>=0?1:-1;
     for(let ei=0;ei<b.pts.length&&budget.count<MAX_FACADE_DETAILS;ei++){
@@ -2661,7 +3130,7 @@
       if(cls==='hdb'){
         // Singapore public housing reads strongly through long access-corridor / balcony bands.
         // Keep these sparse and horizontal so they survive at driving distance without exploding geometry.
-        if(b.minHeight<.5&&b.distance<280)rect(officeOut,.035,.965,.42,2.45,.059); // void-deck shadow cue
+        if(relMin<.5&&b.distance<280)rect(officeOut,.035,.965,groundY+.42,groundY+2.45,.059); // void-deck shadow cue
         const start=b.minHeight+6.2,step=b.distance<230?9.15:12.2;
         for(let y=start;y<b.wallTop-1.4&&budget.count<MAX_FACADE_DETAILS;y+=step){
           rect(hdbOut,.045,.955,y,y+.34,.062);
@@ -2676,17 +3145,17 @@
         const step=b.distance<250?6.1:9.15;
         for(let y=b.minHeight+5.4;y<b.wallTop-1&&budget.count<MAX_FACADE_DETAILS;y+=step)rect(officeOut,.025,.975,y,y+.28,.061);
         if(len>26&&b.distance<250&&budget.count<MAX_FACADE_DETAILS)rect(officeOut,.49,.51,b.minHeight+1,b.wallTop-.7,.064);
-      }else if(cls==='retail'&&b.minHeight<1.5&&b.distance<300){
+      }else if(cls==='retail'&&relMin<1.5&&b.distance<300){
         const bays=Math.min(6,Math.max(1,Math.floor(len/8)));
         for(let k=0;k<bays&&budget.count<MAX_FACADE_DETAILS;k++){
           const t0=(k+.13)/bays,t1=(k+.87)/bays;
-          rect(awningOut,t0,t1,3.55,3.88,.067);
+          rect(awningOut,t0,t1,groundY+3.55,groundY+3.88,.067);
         }
       }else if(cls==='industrial'&&b.distance<260){
         const bays=Math.min(5,Math.max(1,Math.floor(len/11)));
         for(let k=0;k<bays&&budget.count<MAX_FACADE_DETAILS;k++){
           const t0=(k+.16)/bays,t1=(k+.84)/bays;
-          rect(officeOut,t0,t1,4.2,4.48,.059);
+          rect(officeOut,t0,t1,groundY+4.2,groundY+4.48,.059);
         }
       }
     }
@@ -2783,7 +3252,7 @@
     return false;
   }
 
-  function addTropicalVegetation(group,segments,parks,waters,centerX,centerZ,buildings=[]){
+  function addTropicalVegetation(group,segments,parks,waters,centerX,centerZ,buildings=[],terrainPatch=activeTerrainPatch){
     const palms=[],shrubs=[];
     for(let si=0;si<segments.length&&(palms.length+shrubs.length)<MAX_TROPICAL_PLANTS;si++){
       const seg=segments[si],dx=seg.bx-seg.ax,dz=seg.bz-seg.az,len=Math.hypot(dx,dz);if(len<40)continue;
@@ -2797,8 +3266,9 @@
         const boulevard=/primary|secondary/.test(seg.type||'')&&pseudoRandom(seed+d*13)>.62;
         if(waterfront||park||boulevard){
           const scale=.78+pseudoRandom(seed+d*17)*.42;
-          if(waterfront||pseudoRandom(seed+d*23)>.55)palms.push({x,z,scale});
-          else shrubs.push({x,z,scale:.8+scale*.25});
+          const y=terrainHeightAt(x,z,terrainPatch);
+          if(waterfront||pseudoRandom(seed+d*23)>.55)palms.push({x,z,y,scale});
+          else shrubs.push({x,z,y,scale:.8+scale*.25});
         }
       }
     }
@@ -2806,14 +3276,14 @@
       const trunkGeo=new THREE.CylinderGeometry(.14,.24,5.2,7),crownGeo=new THREE.ConeGeometry(2.6,1.25,7);
       const trunks=new THREE.InstancedMesh(trunkGeo,shared.treeTrunk,palms.length),crowns=new THREE.InstancedMesh(crownGeo,shared.palmLeaf,palms.length);
       const m=new THREE.Matrix4(),pos=new THREE.Vector3(),quat=new THREE.Quaternion(),scale=new THREE.Vector3();
-      palms.forEach((t,i)=>{scale.set(t.scale,t.scale,t.scale);pos.set(t.x,2.6*t.scale,t.z);m.compose(pos,quat,scale);trunks.setMatrixAt(i,m);
-        quat.setFromAxisAngle(new THREE.Vector3(0,1,0),pseudoRandom(i*43)*Math.PI*2);scale.set(t.scale*(.92+pseudoRandom(i+9)*.2),t.scale,t.scale*(.92+pseudoRandom(i+19)*.2));pos.set(t.x,5.55*t.scale,t.z);m.compose(pos,quat,scale);crowns.setMatrixAt(i,m);});
+      palms.forEach((t,i)=>{scale.set(t.scale,t.scale,t.scale);pos.set(t.x,(t.y||0)+2.6*t.scale,t.z);m.compose(pos,quat,scale);trunks.setMatrixAt(i,m);
+        quat.setFromAxisAngle(new THREE.Vector3(0,1,0),pseudoRandom(i*43)*Math.PI*2);scale.set(t.scale*(.92+pseudoRandom(i+9)*.2),t.scale,t.scale*(.92+pseudoRandom(i+19)*.2));pos.set(t.x,(t.y||0)+5.55*t.scale,t.z);m.compose(pos,quat,scale);crowns.setMatrixAt(i,m);});
       trunks.instanceMatrix.needsUpdate=true;crowns.instanceMatrix.needsUpdate=true;group.add(trunks,crowns);
     }
     if(shrubs.length){
       const geo=new THREE.IcosahedronGeometry(1.15,1),mesh=new THREE.InstancedMesh(geo,shared.treeLeafLight,shrubs.length);
       const m=new THREE.Matrix4(),pos=new THREE.Vector3(),quat=new THREE.Quaternion(),scale=new THREE.Vector3();
-      shrubs.forEach((t,i)=>{const s=t.scale*(.7+pseudoRandom(i+31)*.4);pos.set(t.x,.85*s,t.z);scale.set(s*1.25,s*.82,s);m.compose(pos,quat,scale);mesh.setMatrixAt(i,m);});
+      shrubs.forEach((t,i)=>{const s=t.scale*(.7+pseudoRandom(i+31)*.4);pos.set(t.x,(t.y||0)+.85*s,t.z);scale.set(s*1.25,s*.82,s);m.compose(pos,quat,scale);mesh.setMatrixAt(i,m);});
       mesh.instanceMatrix.needsUpdate=true;group.add(mesh);
     }
     return palms.length+shrubs.length;
@@ -3194,7 +3664,7 @@
     return count;
   }
 
-  function addRoadsideTrees(group, segments, centerX, centerZ, buildings=[]) {
+  function addRoadsideTrees(group, segments, centerX, centerZ, buildings=[], terrainPatch=activeTerrainPatch) {
     const trees=[];
     const maxTrees=190;
     for(let si=0;si<segments.length && trees.length<maxTrees;si++){
@@ -3213,7 +3683,7 @@
         if(Math.hypot(x-centerX,z-centerZ)>BUILDING_RADIUS_METERS+260)continue;
         if(pointHitsBuildingBounds(x,z,buildings,2.2))continue;
         const scale=.72+pseudoRandom(seed+Math.round(d)*13)*.62;
-        trees.push({x,z,scale});
+        trees.push({x,z,y:terrainHeightAt(x,z,terrainPatch),scale});
       }
     }
     if(!trees.length)return 0;
@@ -3225,9 +3695,9 @@
     const m=new THREE.Matrix4(),pos=new THREE.Vector3(),quat=new THREE.Quaternion(),scale=new THREE.Vector3();
     trees.forEach((t,i)=>{
       scale.set(t.scale,t.scale,t.scale);
-      pos.set(t.x,1.55*t.scale,t.z);
+      pos.set(t.x,(t.y||0)+1.55*t.scale,t.z);
       m.compose(pos,quat,scale);trunks.setMatrixAt(i,m);
-      pos.set(t.x,(4.55+(.35*pseudoRandom(i+51)))*t.scale,t.z);
+      pos.set(t.x,(t.y||0)+(4.55+(.35*pseudoRandom(i+51)))*t.scale,t.z);
       scale.set(t.scale*(.86+pseudoRandom(i+81)*.25),t.scale*(.82+pseudoRandom(i+91)*.28),t.scale*(.86+pseudoRandom(i+101)*.25));
       m.compose(pos,quat,scale);crowns.setMatrixAt(i,m);
     });
@@ -3284,7 +3754,7 @@
     return mesh;
   }
 
-  function buildingDescriptor(el, center) {
+  function buildingDescriptor(el, center, terrainPatch=activeTerrainPatch) {
     const pts=cleanPolygon(el.geometry.map(p=>project(p.lat,p.lon)));
     if(pts.length<3)return null;
     let minX=Infinity,maxX=-Infinity,minZ=Infinity,maxZ=-Infinity;
@@ -3322,8 +3792,11 @@
     minHeight=Math.max(0,Math.min(minHeight,h-1));
     roofHeight=Math.max(0,Math.min(roofHeight,Math.max(0,h-minHeight-1)));
     const wallTop=Math.max(minHeight+1,h-roofHeight);
+    const groundY=terrainHeightAt(x,z,terrainPatch);
+    h+=groundY;minHeight+=groundY;
+    const wallTopWorld=wallTop+groundY;
     return {
-      id:Number(el.id)||1,pts,x,z,w,d,h,wallTop,roofHeight,roofShape,minHeight,distance,area,isPart,kind,
+      id:Number(el.id)||1,pts,x,z,w,d,h,wallTop:wallTopWorld,roofHeight,roofShape,minHeight,groundY,distance,area,isPart,kind,
       name:tags.name||'',
       bounds:{minX,maxX,minZ,maxZ},
       bucket:buildingMaterialBucket(tags,el.id),
@@ -3404,30 +3877,34 @@
   }
   function pseudoRandom(seed) { const x=Math.sin(Number(seed||1)*12.9898)*43758.5453; return x-Math.floor(x); }
 
-  function addLandmarksTo(group, centerX, centerZ) {
+  function addLandmarksTo(group, centerX, centerZ, terrainPatch=activeTerrainPatch) {
     for (const lm of LANDMARKS) {
       const p=project(lm.lat,lm.lon);
       if (Math.hypot(p.x-centerX,p.z-centerZ)>1750) continue;
-      if (lm.kind==='mbs') addMbs(group,p.x,p.z);
-      else if (lm.kind==='flyer') addFlyer(group,p.x,p.z);
-      else if (lm.kind==='dome') addDome(group,p.x,p.z);
-      else if (lm.kind==='artscience') addArtScience(group,p.x,p.z);
-      else if (lm.kind==='merlion') addMerlion(group,p.x,p.z);
-      else if (lm.kind==='supertrees') addSupertrees(group,p.x,p.z);
-      else if (lm.kind==='mbfc') addMbfc(group,p.x,p.z);
-      else if (lm.kind==='fullerton') addFullerton(group,p.x,p.z);
-      else if (lm.kind==='ion') addIon(group,p.x,p.z);
-      else if (lm.kind==='ngeeann') addNgeeAnn(group,p.x,p.z);
-      else if (lm.kind==='orchardgateway') addOrchardGateway(group,p.x,p.z);
-      else if (lm.kind==='jewel') addJewel(group,p.x,p.z);
-      else if (lm.kind==='pinnacle') addPinnacle(group,p.x,p.z);
-      else if (lm.kind==='sportshub') addSportsHub(group,p.x,p.z);
-      else if (lm.kind==='hdbhub') addHdbHub(group,p.x,p.z);
-      else if (lm.kind==='gallery') addNationalGallery(group,p.x,p.z);
-      else if (lm.kind==='raffleshotel') addRafflesHotel(group,p.x,p.z);
-      else if (lm.kind==='vivocity') addVivoCity(group,p.x,p.z);
-      else if (lm.kind==='helix') addHelixBridge(group,p.x,p.z);
-      else if (lm.kind==='ocbc') addOcbcCentre(group,p.x,p.z);
+      const holder=new THREE.Group();
+      holder.position.y=terrainHeightAt(p.x,p.z,terrainPatch);
+      group.add(holder);
+      if (lm.kind==='mbs') addMbs(holder,p.x,p.z);
+      else if (lm.kind==='flyer') addFlyer(holder,p.x,p.z);
+      else if (lm.kind==='dome') addDome(holder,p.x,p.z);
+      else if (lm.kind==='artscience') addArtScience(holder,p.x,p.z);
+      else if (lm.kind==='merlion') addMerlion(holder,p.x,p.z);
+      else if (lm.kind==='supertrees') addSupertrees(holder,p.x,p.z);
+      else if (lm.kind==='mbfc') addMbfc(holder,p.x,p.z);
+      else if (lm.kind==='fullerton') addFullerton(holder,p.x,p.z);
+      else if (lm.kind==='ion') addIon(holder,p.x,p.z);
+      else if (lm.kind==='ngeeann') addNgeeAnn(holder,p.x,p.z);
+      else if (lm.kind==='orchardgateway') addOrchardGateway(holder,p.x,p.z);
+      else if (lm.kind==='jewel') addJewel(holder,p.x,p.z);
+      else if (lm.kind==='pinnacle') addPinnacle(holder,p.x,p.z);
+      else if (lm.kind==='sportshub') addSportsHub(holder,p.x,p.z);
+      else if (lm.kind==='hdbhub') addHdbHub(holder,p.x,p.z);
+      else if (lm.kind==='gallery') addNationalGallery(holder,p.x,p.z);
+      else if (lm.kind==='raffleshotel') addRafflesHotel(holder,p.x,p.z);
+      else if (lm.kind==='vivocity') addVivoCity(holder,p.x,p.z);
+      else if (lm.kind==='helix') addHelixBridge(holder,p.x,p.z);
+      else if (lm.kind==='ocbc') addOcbcCentre(holder,p.x,p.z);
+      if(!holder.children.length){group.remove(holder);}
     }
   }
 
@@ -3617,6 +4094,7 @@
     buildingColliders=built.buildingColliders||[];
     currentWaterPolygons=built.waterPolygons||[];
     currentParkPolygons=built.parkPolygons||[];
+    activeTerrainPatch=built.terrainPatch||null;
     rebuildRoadIndex();
     rebuildBuildingIndex();
     createAmbientTraffic(dynamicWorld,roadSegments,roadGraph);
@@ -3626,7 +4104,7 @@
   }
 
   function disposeWorldGroup(group) {
-    const retained = new Set([shared.sidewalk,shared.roadEdge,shared.road,shared.majorRoad,shared.line,shared.markingYellow,shared.median,shared.bridge,shared.tunnel,shared.water,shared.park,shared.windows,shared.storefront,shared.hdbCorridor,shared.officeBand,shared.awning,shared.islandKerb,shared.treeTrunk,shared.treeLeaf,shared.treeLeafLight,shared.palmLeaf,shared.signalPole,shared.signalHead,shared.signalRed,shared.signalAmber,shared.signalGreen,shared.busStopPole,shared.busStopSign,shared.busShelterRoof,shared.busShelterGlass,shared.streetPole,shared.streetLamp,shared.gantryPole,shared.gantrySign,trafficMaterial,...shared.buildings]);
+    const retained = new Set([shared.terrain,shared.sidewalk,shared.roadEdge,shared.road,shared.majorRoad,shared.line,shared.markingYellow,shared.median,shared.bridge,shared.tunnel,shared.water,shared.park,shared.windows,shared.storefront,shared.hdbCorridor,shared.officeBand,shared.awning,shared.islandKerb,shared.treeTrunk,shared.treeLeaf,shared.treeLeafLight,shared.palmLeaf,shared.signalPole,shared.signalHead,shared.signalRed,shared.signalAmber,shared.signalGreen,shared.busStopPole,shared.busStopSign,shared.busShelterRoof,shared.busShelterGlass,shared.streetPole,shared.streetLamp,shared.gantryPole,shared.gantrySign,trafficMaterial,...shared.buildings]);
     group.traverse(obj=>{
       if(obj.geometry) obj.geometry.dispose?.();
       const mats = Array.isArray(obj.material) ? obj.material : (obj.material ? [obj.material] : []);
@@ -3873,7 +4351,7 @@
 
     const elevationHit=nearestRoadHit(car.position.x,car.position.z,false);
     updateUserTrafficRuleState(elapsed,elevationHit);
-    const elevationTarget=elevationHit&&elevationHit.dist<elevationHit.seg.width/2+4?segmentYAt(elevationHit.seg,elevationHit.t):0;
+    const elevationTarget=elevationHit&&elevationHit.dist<elevationHit.seg.width/2+4?segmentYAt(elevationHit.seg,elevationHit.t):terrainHeightAt(car.position.x,car.position.z,activeTerrainPatch);
     const elevationStep=Math.abs(elevationTarget-lastElevationTarget);
     if(elevationStep>.035&&newAbsSpeed>4)roadShock=Math.max(roadShock,THREE.MathUtils.clamp(elevationStep*.9,0,.65));
     lastElevationTarget=elevationTarget;
@@ -3916,7 +4394,14 @@
   }
 
   function updateCamera(dt,elapsed) {
+    if(!cameraLookActive){
+      cameraLookYaw*=Math.exp(-2.8*dt);
+      cameraLookPitch*=Math.exp(-3.4*dt);
+      if(Math.abs(cameraLookYaw)<.002)cameraLookYaw=0;
+      if(Math.abs(cameraLookPitch)<.002)cameraLookPitch=0;
+    }
     const fx=Math.sin(car.rotation.y),fz=Math.cos(car.rotation.y),sideX=fz,sideZ=-fx;
+    const viewYaw=car.rotation.y+cameraLookYaw,viewFx=Math.sin(viewYaw),viewFz=Math.cos(viewYaw),viewSideX=viewFz,viewSideZ=-viewFx;
     const speedRatio=Math.min(Math.abs(speedMps)/35,1);
     const anticipation=steeringVisual*THREE.MathUtils.lerp(.22,1.2,speedRatio);
     const shakeDecay=Math.exp(-5.4*dt);cameraShake*=shakeDecay;
@@ -3932,27 +4417,40 @@
         car.position.z+fz*1.18+sideZ*shakeX*.18
       );
       target=new THREE.Vector3(
-        car.position.x+fx*THREE.MathUtils.lerp(18,28,speedRatio)-sideX*anticipation*.55,
-        car.position.y+1.12+shakeY*.08,
-        car.position.z+fz*THREE.MathUtils.lerp(18,28,speedRatio)-sideZ*anticipation*.55
+        car.position.x+viewFx*THREE.MathUtils.lerp(18,28,speedRatio)-viewSideX*anticipation*.25,
+        car.position.y+1.12+cameraLookPitch*9+shakeY*.08,
+        car.position.z+viewFz*THREE.MathUtils.lerp(18,28,speedRatio)-viewSideZ*anticipation*.25
       );
       desiredFov=64+speedRatio*4.5;
+    }else if(cameraMode==='scenic'){
+      const back=THREE.MathUtils.lerp(17.5,20.5,speedRatio),height=THREE.MathUtils.lerp(9.2,10.8,speedRatio);
+      desired=new THREE.Vector3(
+        car.position.x-viewFx*back+viewSideX*(3.2+anticipation*.4+shakeX),
+        car.position.y+height+cameraLookPitch*3.5+shakeY*.7,
+        car.position.z-viewFz*back+viewSideZ*(3.2+anticipation*.4+shakeX)
+      );
+      target=new THREE.Vector3(
+        car.position.x+fx*THREE.MathUtils.lerp(5.5,9.0,speedRatio),
+        car.position.y+1.25+cameraLookPitch*4,
+        car.position.z+fz*THREE.MathUtils.lerp(5.5,9.0,speedRatio)
+      );
+      desiredFov=56+speedRatio*4.0;
     }else{
       const back=THREE.MathUtils.lerp(12.2,15.0,speedRatio),height=THREE.MathUtils.lerp(5.9,6.8,speedRatio),lookAhead=THREE.MathUtils.lerp(4.7,8.0,speedRatio);
       desired=new THREE.Vector3(
-        car.position.x-fx*back+sideX*(anticipation+shakeX),
-        car.position.y+height+shakeY,
-        car.position.z-fz*back+sideZ*(anticipation+shakeX)
+        car.position.x-viewFx*back+viewSideX*(anticipation+shakeX),
+        car.position.y+height+cameraLookPitch*2.5+shakeY,
+        car.position.z-viewFz*back+viewSideZ*(anticipation+shakeX)
       );
       target=new THREE.Vector3(
-        car.position.x+fx*lookAhead-sideX*anticipation*.45,
-        car.position.y+1.62+shakeY*.15,
-        car.position.z+fz*lookAhead-sideZ*anticipation*.45
+        car.position.x+fx*lookAhead-sideX*anticipation*.35,
+        car.position.y+1.62+cameraLookPitch*5+shakeY*.15,
+        car.position.z+fz*lookAhead-sideZ*anticipation*.35
       );
       desiredFov=59+speedRatio*5.5;
     }
 
-    const alpha=1-Math.pow(cameraMode==='hood'?.0012:.0028,dt);
+    const alpha=1-Math.pow(cameraMode==='hood'?.0012:(cameraMode==='scenic'?.0042:.0028),dt);
     camera.position.lerp(desired,alpha);camera.lookAt(target);
     const cameraRoll=THREE.MathUtils.clamp(-yawVelocity*speedRatio*.022,-.030,.030)+shakeX*.018;
     camera.rotateZ(cameraRoll);
@@ -3981,9 +4479,9 @@
     setMapState('loading');
     const generation=streamGeneration;
     try{
-      const data=await fetchOsmData(coords.lat,coords.lon);
+      const [data,terrain]=await Promise.all([fetchOsmData(coords.lat,coords.lon),fetchTerrainPatch(coords.lat,coords.lon)]);
       if(generation!==streamGeneration)return;
-      const built=buildWorld(data,{centerX,centerZ});
+      const built=buildWorld(data,{centerX,centerZ},terrain);
       if(built.roadCount<3)throw new Error('Insufficient streamed roads');
       const near=nearestRoadDistanceIn(car.position.x,car.position.z,built.segments);
       if(!Number.isFinite(near)||near>40)throw new Error('Streamed map does not cover the car');
@@ -4004,7 +4502,7 @@
     const target=Math.min(navigation.totalM,navigation.progressM+ROUTE_PREFETCH_METERS);let idx=navigation.cumulativeM.findIndex(v=>v>=target);if(idx<0)idx=navigation.routeCoords.length-1;
     const c=navigation.routeCoords[idx];if(!c||!insideSingapore(c.lat,c.lon))return;
     lastRoutePrefetch=elapsed;routePrefetchBusy=true;
-    fetchOsmData(c.lat,c.lon).catch(()=>{}).finally(()=>{routePrefetchBusy=false;});
+    Promise.allSettled([fetchOsmData(c.lat,c.lon),fetchTerrainPatch(c.lat,c.lon)]).finally(()=>{routePrefetchBusy=false;});
   }
 
   function initialiseGraphicsTier(){
@@ -4065,6 +4563,7 @@
     updateCar(dt,elapsed);
     updateChallenge(dt,elapsed);
     updateNavigation(elapsed);
+    updateDiscoveryExperience(elapsed);
     updateCamera(dt,elapsed);
     updatePresentationFx(dt);
     maybeStreamWorld(elapsed);
@@ -4172,6 +4671,34 @@
     window.addEventListener('pageshow',()=>{if(engineSoundOn)engineAudio?.ctx?.resume?.().catch?.(()=>{});});
   }
 
+  function bindFreeLook(canvas){
+    if(!canvas)return;
+    const blocked=()=>Boolean(
+      els.placesPanel?.classList.contains('open')||
+      els.hopMapOverlay?.classList.contains('show')||
+      els.challengeResult?.classList.contains('show')||
+      els.loader?.classList.contains('show')
+    );
+    canvas.addEventListener('pointerdown',e=>{
+      if(blocked())return;
+      cameraLookPointer=e.pointerId;cameraLookActive=true;cameraLookLast={x:e.clientX,y:e.clientY};
+      canvas.setPointerCapture?.(e.pointerId);
+    },{passive:true});
+    canvas.addEventListener('pointermove',e=>{
+      if(cameraLookPointer!==e.pointerId)return;
+      const dx=e.clientX-cameraLookLast.x,dy=e.clientY-cameraLookLast.y;cameraLookLast={x:e.clientX,y:e.clientY};
+      cameraLookYaw=THREE.MathUtils.clamp(cameraLookYaw-dx*.0065,-1.12,1.12);
+      cameraLookPitch=THREE.MathUtils.clamp(cameraLookPitch-dy*.0035,-.20,.20);
+    },{passive:true});
+    const end=e=>{
+      if(cameraLookPointer!==e.pointerId)return;
+      cameraLookPointer=null;cameraLookActive=false;
+      try{canvas.releasePointerCapture?.(e.pointerId);}catch(_){}
+    };
+    canvas.addEventListener('pointerup',end,{passive:true});
+    canvas.addEventListener('pointercancel',end,{passive:true});
+  }
+
   function bindUi() {
     els.placesBtn.addEventListener('click',()=>setPanelOpen(!els.placesPanel.classList.contains('open')));
     els.closePanelBtn.addEventListener('click',closePanel);
@@ -4180,10 +4707,18 @@
     els.soundBtn.addEventListener('click',toggleEngineSound);
     els.cameraBtn?.addEventListener('click',cycleCameraMode);
     els.shareBtn?.addEventListener('click',shareDriveSG);
-    els.cancelNavBtn.addEventListener('click',()=>{if(challenge.active)cancelChallenge();else clearNavigation();});
+    els.cancelNavBtn.addEventListener('click',()=>{if(challenge.active)cancelChallenge();else if(guidedDrive?.active){cancelGuidedDrive({quiet:true});clearNavigation();}else clearNavigation();});
     els.navigateModeBtn.addEventListener('click',()=>setPlaceMode('navigate'));
     els.startModeBtn.addEventListener('click',()=>setPlaceMode('start'));
     els.challengeModeBtn?.addEventListener('click',()=>setPlaceMode('challenge'));
+    els.discoverSingaporeBtn?.addEventListener('click',openDiscoverView);
+    els.discoverBackBtn?.addEventListener('click',closeDiscoverView);
+    els.hopMapBtn?.addEventListener('click',openHopMap);
+    els.hopMapCloseBtn?.addEventListener('click',closeHopMap);
+    els.hopMapCanvas?.addEventListener('pointerup',handleHopMapTap);
+    els.hopNavigateBtn?.addEventListener('click',hopMapNavigate);
+    els.hopStartBtn?.addEventListener('click',hopMapStart);
+    els.discoveryCardClose?.addEventListener('click',dismissDiscoveryCard);
     els.challengeDoneBtn?.addEventListener('click',finishChallengeAndClose);
     els.challengeAgainBtn?.addEventListener('click',replayLastChallenge);
     els.mapExpandBtn.addEventListener('click',e=>{e.stopPropagation();toggleMiniMapExpanded();});
@@ -4224,6 +4759,10 @@
       if(e.key==='ArrowRight'||e.key.toLowerCase()==='d'){input.steer=1;updateSteerKnob(1);}
       if(e.key.toLowerCase()==='r')resetCar();
       if(e.key.toLowerCase()==='c')cycleCameraMode();
+      if(e.key==='Escape'){
+        if(els.hopMapOverlay?.classList.contains('show'))closeHopMap();
+        else if(discoveryViewOpen)closeDiscoverView();
+      }
     },{passive:false});
     window.addEventListener('keyup',e=>{
       if(e.key==='ArrowUp'||e.key.toLowerCase()==='w')input.gas=0;
@@ -4283,6 +4822,16 @@
     if(!open)showDriveHint();
   }
   function closePanel(){setPanelOpen(false);}
+
+  function maybeShowExperienceHint(){
+    try{
+      if(localStorage.getItem('drivesg-experience-hint-v1'))return;
+      localStorage.setItem('drivesg-experience-hint-v1','1');
+    }catch(_){}
+    setTimeout(()=>{
+      if(!els.placesPanel?.classList.contains('open')&&!els.hopMapOverlay?.classList.contains('show'))showToast('Tip · drag the road view to look around · ◉ changes camera');
+    },3300);
+  }
 
   function showDriveHint(){clearTimeout(hintTimer);els.driveHint.classList.add('show');hintTimer=setTimeout(()=>els.driveHint.classList.remove('show'),4200);}
   function hideHint(){clearTimeout(hintTimer);els.driveHint.classList.remove('show');}
