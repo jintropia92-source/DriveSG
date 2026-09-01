@@ -36,6 +36,15 @@
     { name: 'Woodlands', subtitle: 'North side', lat: 1.4367, lon: 103.7862 }
   ];
 
+  const CHALLENGES = [
+    { id:'marina-orchard', name:'Marina Sprint', difficulty:'CITY', start:{name:'Marina Bay',subtitle:'Challenge start',lat:1.2829,lon:103.8587}, finish:{name:'Orchard',subtitle:'Challenge finish',lat:1.3048,lon:103.8321} },
+    { id:'orchard-sentosa', name:'Island Escape', difficulty:'SCENIC', start:{name:'Orchard',subtitle:'Challenge start',lat:1.3048,lon:103.8321}, finish:{name:'Sentosa',subtitle:'Challenge finish',lat:1.2549,lon:103.8238} },
+    { id:'toa-orchard', name:'Heartland Run', difficulty:'URBAN', start:{name:'Toa Payoh',subtitle:'Challenge start',lat:1.3344,lon:103.8497}, finish:{name:'Orchard',subtitle:'Challenge finish',lat:1.3048,lon:103.8321} },
+    { id:'cbd-jurong', name:'Westbound', difficulty:'LONG', start:{name:'CBD',subtitle:'Challenge start',lat:1.2837,lon:103.8514}, finish:{name:'Jurong East',subtitle:'Challenge finish',lat:1.3331,lon:103.7422} },
+    { id:'toa-woodlands', name:'Northbound', difficulty:'LONG', start:{name:'Toa Payoh',subtitle:'Challenge start',lat:1.3344,lon:103.8497}, finish:{name:'Woodlands',subtitle:'Challenge finish',lat:1.4367,lon:103.7862} },
+    { id:'marina-changi', name:'Airport Express', difficulty:'EPIC', start:{name:'Marina Bay',subtitle:'Challenge start',lat:1.2829,lon:103.8587}, finish:{name:'Jewel Changi Airport',subtitle:'Challenge finish',lat:1.3602,lon:103.9896} }
+  ];
+
   const LANDMARKS = [
     { name: 'Marina Bay Sands', lat: 1.2834, lon: 103.8607, kind: 'mbs' },
     { name: 'Singapore Flyer', lat: 1.2893, lon: 103.8631, kind: 'flyer' },
@@ -142,6 +151,8 @@
   let lastIncidentToastKey = '';
   const mapCache = new Map();
   const geocodeCache = new Map();
+  let challenge = makeEmptyChallenge();
+  let lastChallengeId = '';
 
   const input = { gas: 0, brake: 0, steer: 0 };
   const shared = {};
@@ -162,6 +173,11 @@
     randomBtnLabel: document.getElementById('randomBtnLabel'),
     navigateModeBtn: document.getElementById('navigateModeBtn'),
     startModeBtn: document.getElementById('startModeBtn'),
+    challengeModeBtn: document.getElementById('challengeModeBtn'),
+    placePicker: document.getElementById('placePicker'),
+    challengeSection: document.getElementById('challengeSection'),
+    challengeGrid: document.getElementById('challengeGrid'),
+    challengeProgressLabel: document.getElementById('challengeProgressLabel'),
     panelTitle: document.getElementById('panelTitle'),
     panelIntro: document.getElementById('panelIntro'),
     placeEyebrow: document.getElementById('placeEyebrow'),
@@ -195,6 +211,24 @@
     mapOrientationBtn: document.getElementById('mapOrientationBtn'),
     mapExpandBtn: document.getElementById('mapExpandBtn'),
     routingCredit: document.getElementById('routingCredit'),
+    challengeHud: document.getElementById('challengeHud'),
+    challengeHudName: document.getElementById('challengeHudName'),
+    challengeTimer: document.getElementById('challengeTimer'),
+    challengeScore: document.getElementById('challengeScore'),
+    challengeCountdown: document.getElementById('challengeCountdown'),
+    challengeCountdownText: document.getElementById('challengeCountdownText'),
+    challengeResult: document.getElementById('challengeResult'),
+    challengeResultTitle: document.getElementById('challengeResultTitle'),
+    challengeResultTime: document.getElementById('challengeResultTime'),
+    challengeBestTime: document.getElementById('challengeBestTime'),
+    challengeResultScore: document.getElementById('challengeResultScore'),
+    challengeGrade: document.getElementById('challengeGrade'),
+    challengeCollisions: document.getElementById('challengeCollisions'),
+    challengeOffroad: document.getElementById('challengeOffroad'),
+    challengeSpeeding: document.getElementById('challengeSpeeding'),
+    challengeResultNote: document.getElementById('challengeResultNote'),
+    challengeDoneBtn: document.getElementById('challengeDoneBtn'),
+    challengeAgainBtn: document.getElementById('challengeAgainBtn'),
     steerZone: document.getElementById('steerZone'),
     steerKnob: document.getElementById('steerKnob'),
     gasBtn: document.getElementById('gasBtn'),
@@ -212,6 +246,7 @@
     if (!window.THREE) return;
     buildPresetButtons();
     buildRecentDestinations();
+    buildChallengeButtons();
     bindUi();
     try{
       miniMapHeadingUp=localStorage.getItem('drivesg-map-heading-up')!=='0';
@@ -411,6 +446,7 @@
   }
 
   async function loadLocation(place, options = {}) {
+    if(challenge.active&&!options.preserveChallenge)cancelChallenge({quiet:true,keepNavigation:true});
     if(navigation.active||navigation.routeGroup)clearNavigation({quiet:true});
     const generation = ++streamGeneration;
     streamBusy = true;
@@ -444,7 +480,7 @@
       setProgress(100, 'Ready to drive');
       setMapState('live');
       setTimeout(hideLoader, 220);
-      if (!options.keepPanelOpen) { setPlaceMode('navigate'); closePanel(); }
+      if (!options.keepPanelOpen) { if(!options.preserveChallenge)setPlaceMode('navigate'); closePanel(); }
       showToast(`${built.roadCount} roads · ${built.buildingCount} real buildings loaded`);
     } catch (err) {
       console.warn('Live road data unavailable. Falling back to bundled Marina Bay demo.', err);
@@ -459,7 +495,7 @@
       setMapState('offline');
       setTimeout(hideLoader, 240);
       showToast('Demo roads loaded — live map request failed');
-      if (!options.keepPanelOpen) { setPlaceMode('navigate'); closePanel(); }
+      if (!options.keepPanelOpen) { if(!options.preserveChallenge)setPlaceMode('navigate'); closePanel(); }
     } finally {
       if (generation === streamGeneration) streamBusy = false;
     }
@@ -557,6 +593,7 @@
   }
 
   async function navigateTo(place, options={}) {
+    if(challenge.active&&!options.challengeRoute)cancelChallenge({quiet:true,keepNavigation:true});
     if(!place || !insideSingapore(Number(place.lat),Number(place.lon))) {
       showToast('Choose a destination inside Singapore');
       return;
@@ -841,6 +878,7 @@
     if(navigation.arrived)return;
     navigation.arrived=true;
     navigation.active=false;
+    const completedChallenge=finishChallenge();
     currentLocationName=navigation.destination.name;
     savePlace({name:currentLocationName,subtitle:'Last destination',lat:navigation.destination.lat,lon:navigation.destination.lon});
     clearActiveDestination();
@@ -852,8 +890,8 @@
     els.navRemaining.textContent='ARRIVED';
     els.navEta.textContent='';
     els.placeEyebrow.textContent='ARRIVED';
-    setTimeout(()=>{if(navigation.arrived)clearNavigation({quiet:true});},5000);
-    showToast(`Arrived at ${navigation.destination.name}`);
+    if(!completedChallenge)setTimeout(()=>{if(navigation.arrived)clearNavigation({quiet:true});},5000);
+    if(!completedChallenge)showToast(`Arrived at ${navigation.destination.name}`);
   }
 
   function routeProgressForPoint(x,z,forceFull=false) {
@@ -938,10 +976,19 @@
 
 
   function setPlaceMode(mode) {
-    placeMode=mode==='start'?'start':'navigate';
-    const nav=placeMode==='navigate';
+    placeMode=mode==='start'?'start':(mode==='challenge'?'challenge':'navigate');
+    const nav=placeMode==='navigate',startHere=placeMode==='start',challengeView=placeMode==='challenge';
     els.navigateModeBtn.classList.toggle('active',nav);
-    els.startModeBtn.classList.toggle('active',!nav);
+    els.startModeBtn.classList.toggle('active',startHere);
+    els.challengeModeBtn?.classList.toggle('active',challengeView);
+    els.placePicker?.classList.toggle('hidden',challengeView);
+    els.challengeSection?.classList.toggle('hidden',!challengeView);
+    if(challengeView){
+      els.panelTitle.textContent='Choose a Singapore drive';
+      els.panelIntro.textContent='Timed point-to-point drives use the same real roads and navigation. Clean driving matters: collisions, off-road time and speeding reduce your score.';
+      buildChallengeButtons();
+      return;
+    }
     els.panelTitle.textContent=nav?'Where do you want to go?':'Where do you want to start?';
     els.panelIntro.textContent=nav
       ?`You are driving around ${currentLocationName}. Pick a destination and DriveSG will guide you there; “Start here” teleports to a new starting area.`
@@ -952,6 +999,7 @@
 
   function handlePlaceChoice(place) {
     if(placeMode==='navigate')navigateTo(place);
+    else if(placeMode==='challenge')return;
     else{
       clearNavigation({quiet:true});
       loadLocation(place);
@@ -997,6 +1045,157 @@
       btn.addEventListener('click',()=>{setPlaceMode('navigate');navigateTo(place);});
       els.recentGrid.appendChild(btn);
     });
+  }
+
+  function makeEmptyChallenge() {
+    return { active:false, phase:'idle', id:'', def:null, startedAt:0, countdownEnds:0, elapsedS:0, offRoadS:0, speedingS:0, speedingPenalty:0, collisions:0, score:100, lastCollisionAt:-Infinity, newBest:false };
+  }
+
+  function readChallengeBests(){
+    try{const v=JSON.parse(localStorage.getItem('drivesg-challenge-bests')||'{}');return v&&typeof v==='object'?v:{};}catch(_){return {};}
+  }
+
+  function writeChallengeBests(v){try{localStorage.setItem('drivesg-challenge-bests',JSON.stringify(v));}catch(_){} }
+
+  function challengeGrade(score){if(score>=96)return'S';if(score>=90)return'A';if(score>=80)return'B';if(score>=68)return'C';return'D';}
+
+  function formatChallengeTime(seconds){
+    const n=Math.max(0,Number(seconds)||0),mins=Math.floor(n/60),secs=n-mins*60;
+    return `${mins}:${secs.toFixed(1).padStart(4,'0')}`;
+  }
+
+  function buildChallengeButtons(){
+    if(!els.challengeGrid)return;
+    const bests=readChallengeBests();
+    const completed=CHALLENGES.filter(c=>Number.isFinite(bests[c.id]?.bestTimeS)).length;
+    if(els.challengeProgressLabel)els.challengeProgressLabel.textContent=`${completed}/${CHALLENGES.length} completed`;
+    els.challengeGrid.innerHTML='';
+    CHALLENGES.forEach(def=>{
+      const best=bests[def.id],button=document.createElement('button');button.type='button';button.className='challenge-card'+(best?' completed':'');
+      const bestText=best?formatChallengeTime(best.bestTimeS):'Not driven';
+      button.innerHTML=`<div class="challenge-card-head"><strong>${escapeHtml(def.name)}</strong><span class="challenge-chip">${escapeHtml(def.difficulty)}</span></div><span class="challenge-route">${escapeHtml(def.start.name)} → ${escapeHtml(def.finish.name)}</span><div class="challenge-best"><span>PERSONAL BEST</span><b>${bestText}</b></div>`;
+      button.addEventListener('click',()=>startChallenge(def));
+      els.challengeGrid.appendChild(button);
+    });
+  }
+
+  async function startChallenge(def){
+    if(!def)return;
+    lastChallengeId=def.id;
+    challenge=makeEmptyChallenge();
+    challenge.active=true;challenge.phase='loading';challenge.id=def.id;challenge.def=def;
+    hideChallengeResult();
+    clearNavigation({quiet:true});
+    closePanel();
+    els.challengeHud?.classList.add('show');
+    if(els.challengeHudName)els.challengeHudName.textContent=def.name;
+    if(els.challengeTimer)els.challengeTimer.textContent='READY';
+    if(els.challengeScore)els.challengeScore.textContent='100';
+    await loadLocation(def.start,{preserveChallenge:true,keepPanelOpen:false});
+    if(!challenge.active||challenge.id!==def.id)return;
+    await navigateTo(def.finish,{quiet:true,challengeRoute:true});
+    if(!challenge.active||challenge.id!==def.id)return;
+    beginChallengeCountdown();
+  }
+
+  function beginChallengeCountdown(){
+    challenge.phase='countdown';
+    challenge.countdownEnds=(clock?.elapsedTime||0)+3.25;
+    challenge.elapsedS=0;challenge.score=100;
+    speedMps=0;clearInputs();
+    els.challengeCountdown?.classList.add('show');
+    els.challengeCountdown?.classList.remove('go');
+    if(els.challengeCountdownText)els.challengeCountdownText.textContent='3';
+    showToast('Clean drive = higher score');
+  }
+
+  function updateChallenge(dt,elapsed){
+    if(!challenge.active)return;
+    if(challenge.phase==='countdown'){
+      clearInputs();speedMps*=Math.max(0,1-dt*8);
+      const remaining=challenge.countdownEnds-elapsed;
+      if(remaining<=0){
+        challenge.phase='running';challenge.startedAt=elapsed;challenge.elapsedS=0;
+        if(els.challengeCountdownText)els.challengeCountdownText.textContent='GO';
+        els.challengeCountdown?.classList.add('go');
+        setTimeout(()=>{if(challenge.phase==='running')els.challengeCountdown?.classList.remove('show','go');},520);
+      }else if(els.challengeCountdownText){
+        els.challengeCountdownText.textContent=String(Math.min(3,Math.max(1,Math.ceil(remaining))));
+      }
+      return;
+    }
+    if(challenge.phase!=='running')return;
+    challenge.elapsedS=Math.max(0,elapsed-challenge.startedAt);
+    const kmh=Math.abs(speedMps)*3.6;
+    if(kmh>4&&!onRoad)challenge.offRoadS+=dt;
+    if(lastSpeedLimit&&kmh>lastSpeedLimit+6){
+      challenge.speedingS+=dt;
+      challenge.speedingPenalty+=dt*.34*Math.min(2.4,1+(kmh-lastSpeedLimit-6)/28);
+    }
+    challenge.score=Math.max(0,Math.round(100-challenge.collisions*12-challenge.offRoadS*1.25-challenge.speedingPenalty));
+    if(els.challengeTimer)els.challengeTimer.textContent=formatChallengeTime(challenge.elapsedS);
+    if(els.challengeScore)els.challengeScore.textContent=String(challenge.score);
+  }
+
+  function recordChallengeCollision(elapsed){
+    if(!challenge.active||challenge.phase!=='running'||elapsed-challenge.lastCollisionAt<.85)return;
+    challenge.lastCollisionAt=elapsed;challenge.collisions++;
+    if(challenge.collisions<=3)showToast(`Collision · drive score -12`);
+  }
+
+  function finishChallenge(){
+    if(!challenge.active||challenge.phase!=='running'||!challenge.def)return false;
+    challenge.phase='finished';
+    const def=challenge.def,bests=readChallengeBests(),old=bests[def.id]||null;
+    const result={bestTimeS:old?.bestTimeS,bestScore:Math.max(Number(old?.bestScore)||0,challenge.score),runs:(Number(old?.runs)||0)+1};
+    challenge.newBest=!Number.isFinite(old?.bestTimeS)||challenge.elapsedS<old.bestTimeS;
+    if(challenge.newBest)result.bestTimeS=challenge.elapsedS;
+    else result.bestTimeS=old.bestTimeS;
+    bests[def.id]=result;writeChallengeBests(bests);buildChallengeButtons();
+    if(els.challengeResultTitle)els.challengeResultTitle.textContent=def.name;
+    if(els.challengeResultTime)els.challengeResultTime.textContent=formatChallengeTime(challenge.elapsedS);
+    if(els.challengeBestTime)els.challengeBestTime.textContent=challenge.newBest?'NEW PERSONAL BEST':`BEST ${formatChallengeTime(result.bestTimeS)}`;
+    if(els.challengeResultScore)els.challengeResultScore.textContent=String(challenge.score);
+    if(els.challengeGrade)els.challengeGrade.textContent=challengeGrade(challenge.score);
+    if(els.challengeCollisions)els.challengeCollisions.textContent=String(challenge.collisions);
+    if(els.challengeOffroad)els.challengeOffroad.textContent=`${challenge.offRoadS.toFixed(1)}s`;
+    if(els.challengeSpeeding)els.challengeSpeeding.textContent=`${challenge.speedingS.toFixed(1)}s`;
+    const notes=[];
+    if(challenge.newBest)notes.push('New personal best.');
+    if(challenge.score>=96)notes.push('Exceptional control — almost spotless.');
+    else if(challenge.collisions)notes.push(`${challenge.collisions} collision${challenge.collisions===1?'':'s'} cost ${challenge.collisions*12} score.`);
+    else if(challenge.offRoadS>2)notes.push('Keep the car on the road to protect your score.');
+    else if(challenge.speedingS>5)notes.push('A little less speeding would lift the drive score.');
+    else notes.push('Clean, controlled drive.');
+    if(els.challengeResultNote)els.challengeResultNote.textContent=notes.join(' ');
+    els.challengeHud?.classList.remove('show');
+    els.challengeCountdown?.classList.remove('show','go');
+    els.challengeResult?.classList.add('show');document.body.classList.add('challenge-result-open');clearInputs();
+    return true;
+  }
+
+  function hideChallengeResult(){els.challengeResult?.classList.remove('show');document.body.classList.remove('challenge-result-open');}
+
+  function cancelChallenge({quiet=false,keepNavigation=false}={}){
+    if(!challenge.active)return;
+    challenge=makeEmptyChallenge();
+    els.challengeHud?.classList.remove('show');els.challengeCountdown?.classList.remove('show','go');hideChallengeResult();
+    if(!keepNavigation)clearNavigation({quiet:true});
+    if(!quiet)showToast('Challenge ended');
+  }
+
+  function finishChallengeAndClose(){
+    hideChallengeResult();
+    challenge=makeEmptyChallenge();
+    clearNavigation({quiet:true});
+    setPlaceMode('challenge');
+    setPanelOpen(true);
+  }
+
+  function replayLastChallenge(){
+    const def=CHALLENGES.find(c=>c.id===lastChallengeId)||challenge.def;
+    hideChallengeResult();challenge=makeEmptyChallenge();
+    if(def)startChallenge(def);
   }
 
   function ensureMiniMapResolution() {
@@ -2482,7 +2681,9 @@
 
   function updateCar(dt,elapsed) {
     const panelOpen=els.placesPanel.classList.contains('open');
-    const gas=panelOpen?0:input.gas,brake=panelOpen?0:input.brake,steer=panelOpen?0:input.steer;
+    const challengeLocked=challenge.active&&challenge.phase==='countdown';
+    const controlsLocked=panelOpen||challengeLocked||document.body.classList.contains('challenge-result-open');
+    const gas=controlsLocked?0:input.gas,brake=controlsLocked?0:input.brake,steer=controlsLocked?0:input.steer;
 
     const accel=7.0*(1-wetness*.05);
     const brakeForce=15.8*(1-wetness*.14);
@@ -2544,10 +2745,12 @@
     car.position.x+=fx*speedMps*dt;
     car.position.z+=fz*speedMps*dt;
 
-    if(carHitsBuilding(car.position.x,car.position.z,carRoadY)||carHitsTraffic(car.position.x,car.position.z,carRoadY)||carHitsWater(car.position.x,car.position.z,carRoadY)){
+    const collision=carHitsBuilding(car.position.x,car.position.z,carRoadY)||carHitsTraffic(car.position.x,car.position.z,carRoadY)||carHitsWater(car.position.x,car.position.z,carRoadY);
+    if(collision){
       car.position.x=beforeX;
       car.position.z=beforeZ;
       speedMps*=-.08;
+      recordChallengeCollision(elapsed);
     }
 
     const elevationHit=nearestRoadHit(car.position.x,car.position.z,false);
@@ -2684,6 +2887,7 @@
     updateSignalVisual(elapsed);
     updateAmbientTraffic(dt,elapsed);
     updateCar(dt,elapsed);
+    updateChallenge(dt,elapsed);
     updateNavigation(elapsed);
     updateCamera(dt);
     maybeStreamWorld(elapsed);
@@ -2734,9 +2938,12 @@
     els.resetBtn.addEventListener('click',resetCar);
     els.lightingBtn?.addEventListener('click',cycleLightingMode);
     els.soundBtn.addEventListener('click',toggleEngineSound);
-    els.cancelNavBtn.addEventListener('click',()=>clearNavigation());
+    els.cancelNavBtn.addEventListener('click',()=>{if(challenge.active)cancelChallenge();else clearNavigation();});
     els.navigateModeBtn.addEventListener('click',()=>setPlaceMode('navigate'));
     els.startModeBtn.addEventListener('click',()=>setPlaceMode('start'));
+    els.challengeModeBtn?.addEventListener('click',()=>setPlaceMode('challenge'));
+    els.challengeDoneBtn?.addEventListener('click',finishChallengeAndClose);
+    els.challengeAgainBtn?.addEventListener('click',replayLastChallenge);
     els.mapExpandBtn.addEventListener('click',e=>{e.stopPropagation();toggleMiniMapExpanded();});
     els.miniMapCanvas.addEventListener('click',()=>toggleMiniMapExpanded());
     els.mapOrientationBtn.addEventListener('click',e=>{
@@ -2826,7 +3033,7 @@
 
   function setPanelOpen(open) {
     if(open&&miniMapExpanded)toggleMiniMapExpanded();
-    if(open){setPlaceMode(placeMode);buildRecentDestinations();refreshPresetDistances();}
+    if(open){setPlaceMode(placeMode);buildRecentDestinations();buildChallengeButtons();refreshPresetDistances();}
     els.placesPanel.classList.toggle('open',open);
     document.body.classList.toggle('panel-open',open);
     clearInputs();

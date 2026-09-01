@@ -10,7 +10,7 @@
   <meta name="format-detection" content="telephone=no" />
   <meta name="color-scheme" content="dark" />
   <title>DriveSG — Singapore, playable.</title>
-  <link rel="stylesheet" href="styles.css?b=20260901backend1" />
+  <link rel="stylesheet" href="styles.css?b=20260901game1" />
   <script>window.DRIVESG_CONFIG={backendBase:'https://drivesg-api.vercel.app'};</script>
 </head>
 <body>
@@ -74,35 +74,75 @@
         <button id="closePanelBtn" class="close-btn" type="button" aria-label="Close places">×</button>
       </div>
 
-      <div class="mode-switch" role="group" aria-label="Place selection mode">
-        <button id="navigateModeBtn" class="active" type="button">Navigate to</button>
+      <div class="mode-switch three" role="group" aria-label="Drive mode">
+        <button id="navigateModeBtn" class="active" type="button">Navigate</button>
         <button id="startModeBtn" type="button">Start here</button>
+        <button id="challengeModeBtn" type="button">Challenges</button>
       </div>
 
-      <div class="quick-row">
-        <button id="nearMeBtn" class="quick-btn" type="button"><span>◎</span><strong>Use my location</strong></button>
-        <button id="randomBtn" class="quick-btn" type="button"><span>↝</span><strong id="randomBtnLabel">Random destination</strong></button>
+      <div id="placePicker">
+        <div class="quick-row">
+          <button id="nearMeBtn" class="quick-btn" type="button"><span>◎</span><strong>Use my location</strong></button>
+          <button id="randomBtn" class="quick-btn" type="button"><span>↝</span><strong id="randomBtnLabel">Random destination</strong></button>
+        </div>
+
+        <form id="searchForm" class="search-row" role="search">
+          <input id="searchInput" autocomplete="off" autocapitalize="words" enterkeyhint="search" inputmode="search" placeholder="Search destination, e.g. Bugis" aria-label="Search Singapore place" />
+          <button type="submit">Go</button>
+        </form>
+        <div id="searchMsg" class="search-msg" aria-live="polite"></div>
+
+        <section id="recentSection" class="recent-section hidden">
+          <div class="section-label">RECENT DESTINATIONS</div>
+          <div id="recentGrid" class="recent-grid"></div>
+        </section>
+
+        <div class="section-label preset-label">POPULAR AREAS</div>
+        <div id="presetGrid" class="preset-grid"></div>
       </div>
 
-      <form id="searchForm" class="search-row" role="search">
-        <input id="searchInput" autocomplete="off" autocapitalize="words" enterkeyhint="search" inputmode="search" placeholder="Search destination, e.g. Bugis" aria-label="Search Singapore place" />
-        <button type="submit">Go</button>
-      </form>
-      <div id="searchMsg" class="search-msg" aria-live="polite"></div>
-
-      <section id="recentSection" class="recent-section hidden">
-        <div class="section-label">RECENT DESTINATIONS</div>
-        <div id="recentGrid" class="recent-grid"></div>
+      <section id="challengeSection" class="challenge-section hidden" aria-label="Drive challenges">
+        <div class="challenge-lead">
+          <span class="section-label">CURATED SINGAPORE DRIVES</span>
+          <strong id="challengeProgressLabel">0 completed</strong>
+        </div>
+        <div id="challengeGrid" class="challenge-grid"></div>
       </section>
-
-      <div class="section-label preset-label">POPULAR AREAS</div>
-      <div id="presetGrid" class="preset-grid"></div>
 
       <div class="panel-foot">
         <span class="status-dot"></span>
         <span>DriveSG backend · OpenStreetMap world · Singapore only</span>
       </div>
     </aside>
+
+
+    <section id="challengeHud" class="challenge-hud" aria-live="polite">
+      <div><span>CHALLENGE</span><strong id="challengeHudName">Singapore Drive</strong></div>
+      <div class="challenge-hud-stats"><b id="challengeTimer">0:00.0</b><small><span id="challengeScore">100</span> SCORE</small></div>
+    </section>
+
+    <div id="challengeCountdown" class="challenge-countdown" aria-live="assertive"><span id="challengeCountdownText">3</span></div>
+
+    <section id="challengeResult" class="challenge-result" role="dialog" aria-modal="true" aria-labelledby="challengeResultTitle">
+      <div class="challenge-result-card">
+        <div class="result-kicker">DRIVE COMPLETE</div>
+        <h2 id="challengeResultTitle">Marina Sprint</h2>
+        <div class="result-hero">
+          <div><span>TIME</span><strong id="challengeResultTime">0:00.0</strong><small id="challengeBestTime">PERSONAL BEST</small></div>
+          <div class="result-score"><span>DRIVE SCORE</span><strong id="challengeResultScore">100</strong><small id="challengeGrade">S</small></div>
+        </div>
+        <div class="result-stats">
+          <div><span>COLLISIONS</span><b id="challengeCollisions">0</b></div>
+          <div><span>OFF ROAD</span><b id="challengeOffroad">0.0s</b></div>
+          <div><span>SPEEDING</span><b id="challengeSpeeding">0.0s</b></div>
+        </div>
+        <p id="challengeResultNote">Clean drive.</p>
+        <div class="result-actions">
+          <button id="challengeDoneBtn" type="button">Done</button>
+          <button id="challengeAgainBtn" class="primary" type="button">Drive again</button>
+        </div>
+      </div>
+    </section>
 
     <section class="drive-hud" aria-label="Driving information">
       <div class="speed-readout"><span id="speed">0</span><small>km/h</small></div>
@@ -149,6 +189,6 @@
     <footer class="attribution"><a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">© OpenStreetMap</a><span id="routingCredit"></span></footer>
   </main>
 
-  <script src="boot.js?b=20260901backend1"></script>
+  <script src="boot.js?b=20260901game1"></script>
 </body>
 </html>
