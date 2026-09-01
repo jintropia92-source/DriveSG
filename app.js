@@ -153,6 +153,20 @@
   const geocodeCache = new Map();
   let challenge = makeEmptyChallenge();
   let lastChallengeId = '';
+  // Driving-dynamics state. We keep the proven scalar forward-speed model but add
+  // yaw inertia, lateral tyre slip and transient suspension/camera response around it.
+  let lateralSlipMps = 0;
+  let yawVelocity = 0;
+  let tyreSlip = 0;
+  let absActive = false;
+  let tcsActive = false;
+  let cameraMode = 'chase';
+  let cameraShake = 0;
+  let suspensionHeave = 0;
+  let suspensionHeaveVel = 0;
+  let lastPhysicsSpeedMps = 0;
+  let lastElevationTarget = 0;
+  let roadShock = 0;
 
   const input = { gas: 0, brake: 0, steer: 0 };
   const shared = {};
@@ -165,6 +179,7 @@
     resetBtn: document.getElementById('resetBtn'),
     lightingBtn: document.getElementById('lightingBtn'),
     soundBtn: document.getElementById('soundBtn'),
+    cameraBtn: document.getElementById('cameraBtn'),
     weatherBadge: document.getElementById('weatherBadge'),
     weatherIcon: document.getElementById('weatherIcon'),
     weatherText: document.getElementById('weatherText'),
@@ -191,6 +206,9 @@
     mapDot: document.getElementById('mapDot'),
     speed: document.getElementById('speed'),
     gear: document.getElementById('gear'),
+    gripIndicator: document.getElementById('gripIndicator'),
+    absIndicator: document.getElementById('absIndicator'),
+    tcsIndicator: document.getElementById('tcsIndicator'),
     surfaceState: document.getElementById('surfaceState'),
     roadName: document.getElementById('roadName'),
     tripDistance: document.getElementById('tripDistance'),
@@ -251,10 +269,13 @@
     try{
       miniMapHeadingUp=localStorage.getItem('drivesg-map-heading-up')!=='0';
       lightingMode=localStorage.getItem('drivesg-lighting-mode')||'auto';
+      cameraMode=localStorage.getItem('drivesg-camera-mode')||'chase';
     }catch(_){}
     if(!['auto','day','dusk','night'].includes(lightingMode))lightingMode='auto';
+    if(!['chase','hood'].includes(cameraMode))cameraMode='chase';
     els.mapOrientationBtn.textContent=miniMapHeadingUp?'↗':'N';
     updateLightingButton();
+    updateCameraButton();
     setPlaceMode('navigate');
     initThree();
     createCar();
@@ -460,6 +481,7 @@
     lastSpeedLimit=null;
     els.speedLimit?.classList.add('hidden');
     speedMps = 0;
+    resetDrivingDynamics();
     resetSessionStats();
     input.gas = input.brake = input.steer = 0;
     updateSteerKnob(0);
@@ -1614,7 +1636,14 @@
       const ctx=new AC(),osc=ctx.createOscillator(),filter=ctx.createBiquadFilter(),gain=ctx.createGain();
       osc.type='sawtooth';osc.frequency.value=55;filter.type='lowpass';filter.frequency.value=520;filter.Q.value=.7;gain.gain.value=.0001;
       osc.connect(filter);filter.connect(gain);gain.connect(ctx.destination);osc.start();
-      engineAudio={ctx,osc,filter,gain};
+
+      // A filtered looping-noise source gives tyre scrub / wet-road hiss without loading an audio asset.
+      const tyreBuffer=ctx.createBuffer(1,Math.max(1,Math.floor(ctx.sampleRate*1.25)),ctx.sampleRate);
+      const samples=tyreBuffer.getChannelData(0);for(let i=0;i<samples.length;i++)samples[i]=(Math.random()*2-1)*.62;
+      const tyreSource=ctx.createBufferSource(),tyreFilter=ctx.createBiquadFilter(),tyreGain=ctx.createGain();
+      tyreSource.buffer=tyreBuffer;tyreSource.loop=true;tyreFilter.type='bandpass';tyreFilter.frequency.value=760;tyreFilter.Q.value=.55;tyreGain.gain.value=.0001;
+      tyreSource.connect(tyreFilter);tyreFilter.connect(tyreGain);tyreGain.connect(ctx.destination);tyreSource.start();
+      engineAudio={ctx,osc,filter,gain,tyreSource,tyreFilter,tyreGain};
     }catch(err){console.warn('Engine audio unavailable',err);engineSoundOn=false;}
   }
 
@@ -1624,6 +1653,55 @@
     engineAudio.gain.gain.cancelScheduledValues(now);engineAudio.gain.gain.linearRampToValueAtTime(target,now+.08);
     const rev=55+Math.abs(speedMps)*5.4+input.gas*18;
     engineAudio.osc.frequency.setTargetAtTime(rev,now,.06);engineAudio.filter.frequency.setTargetAtTime(430+Math.abs(speedMps)*28,now,.08);
+    if(engineAudio.tyreGain){
+      const scrub=engineSoundOn?THREE.MathUtils.clamp(tyreSlip*.052+(onRoad?wetness*.005:.014)*Math.min(Math.abs(speedMps)/15,1),.0001,.034):.0001;
+      engineAudio.tyreGain.gain.setTargetAtTime(scrub,now,.035);
+      engineAudio.tyreFilter.frequency.setTargetAtTime(620+Math.abs(speedMps)*24+tyreSlip*650,now,.05);
+    }
+  }
+
+  function playCollisionThump() {
+    if(!engineSoundOn||!engineAudio?.ctx)return;
+    try{
+      const ctx=engineAudio.ctx,now=ctx.currentTime,osc=ctx.createOscillator(),gain=ctx.createGain();
+      osc.type='sine';osc.frequency.setValueAtTime(72,now);osc.frequency.exponentialRampToValueAtTime(38,now+.12);
+      gain.gain.setValueAtTime(.055,now);gain.gain.exponentialRampToValueAtTime(.0001,now+.18);
+      osc.connect(gain);gain.connect(ctx.destination);osc.start(now);osc.stop(now+.19);
+    }catch(_){}
+  }
+
+  function updateCameraButton(){
+    if(!els.cameraBtn)return;
+    els.cameraBtn.textContent=cameraMode==='hood'?'▣':'◉';
+    els.cameraBtn.title=`Camera: ${cameraMode==='hood'?'Hood':'Chase'}`;
+    els.cameraBtn.setAttribute('aria-label',`Change driving camera. Current: ${cameraMode==='hood'?'hood':'chase'}`);
+  }
+
+  function cycleCameraMode(){
+    cameraMode=cameraMode==='chase'?'hood':'chase';
+    try{localStorage.setItem('drivesg-camera-mode',cameraMode);}catch(_){}
+    updateCameraButton();
+    cameraShake=Math.max(cameraShake,.08);
+    showToast(cameraMode==='hood'?'Hood camera · closer road view':'Chase camera');
+  }
+
+  function resetDrivingDynamics(){
+    lateralSlipMps=0;yawVelocity=0;tyreSlip=0;absActive=false;tcsActive=false;cameraShake=0;roadShock=0;
+    suspensionHeave=0;suspensionHeaveVel=0;lastPhysicsSpeedMps=0;lastElevationTarget=carRoadY||0;
+    updateDynamicsHud();
+  }
+
+  function updateDynamicsHud(){
+    if(!els.gripIndicator)return;
+    const slipLevel=THREE.MathUtils.clamp(tyreSlip,0,1.4);
+    let label='GRIP',state='';
+    if(!onRoad){label='LOOSE';state='warn';}
+    else if(wetness>.28){label='WET';state=slipLevel>.34?'warn':'wet';}
+    else if(slipLevel>.42){label='SLIP';state='warn';}
+    els.gripIndicator.textContent=label;
+    els.gripIndicator.className=`dyn grip ${state}`.trim();
+    els.absIndicator?.classList.toggle('active',absActive);
+    els.tcsIndicator?.classList.toggle('active',tcsActive);
   }
 
   function buildWorld(data, center = {}) {
@@ -2669,6 +2747,7 @@
     speedMps=0;
     reverseHold=0;
     carRoadY=segmentYAt(seg,best.t);
+    resetDrivingDynamics();
     car.position.set(px,.07+carRoadY,pz);
     car.rotation.set(0,yaw,0);
     steeringVisual=0;
@@ -2685,8 +2764,16 @@
     const controlsLocked=panelOpen||challengeLocked||document.body.classList.contains('challenge-result-open');
     const gas=controlsLocked?0:input.gas,brake=controlsLocked?0:input.brake,steer=controlsLocked?0:input.steer;
 
-    const accel=7.0*(1-wetness*.05);
-    const brakeForce=15.8*(1-wetness*.14);
+    const absSpeed=Math.abs(speedMps);
+    const roadGrip=onRoad?THREE.MathUtils.lerp(1,.68,wetness):.43;
+    const steerLoad=Math.abs(steer)*Math.min(absSpeed/25,1);
+    const tractionDemand=gas*(.58+steerLoad*.62)*(wetness+.22);
+    tcsActive=Boolean(onRoad&&absSpeed>5&&tractionDemand>.48);
+
+    const accel=7.15*(1-wetness*.055)*(tcsActive?THREE.MathUtils.lerp(.84,.61,wetness):1);
+    const baseBrake=15.9*(onRoad?1:.58)*THREE.MathUtils.lerp(1,.77,wetness);
+    absActive=Boolean(brake>.72&&absSpeed>7&&(wetness>.16||!onRoad));
+    const brakeForce=baseBrake*(absActive?(.93+.035*Math.sin(elapsed*76)):1);
     const reverseAccel=4.8;
 
     if(gas>0){
@@ -2700,10 +2787,7 @@
         reverseHold=0;
         speedMps-=brakeForce*brake*dt;
       }else{
-        if(speedMps>-.12){
-          speedMps=0;
-          reverseHold+=dt;
-        }
+        if(speedMps>-.12){speedMps=0;reverseHold+=dt;}
         if(reverseHold>.22 || speedMps<-.12) speedMps-=reverseAccel*brake*dt;
       }
     }else if(!gas){
@@ -2711,29 +2795,57 @@
     }
 
     if(!gas&&!brake){
-      const drag=(onRoad?0.78:2.9)*dt;
+      const drag=(onRoad?.80:3.15)*dt;
       if(Math.abs(speedMps)<=drag)speedMps=0;else speedMps-=Math.sign(speedMps)*drag;
     }
 
-    const maxForward=onRoad?35.0:12.8;
+    const maxForward=onRoad?35.4:12.4;
     speedMps=THREE.MathUtils.clamp(speedMps,-8.8,maxForward);
+    const newAbsSpeed=Math.abs(speedMps);
 
-    const absSpeed=Math.abs(speedMps);
-    const steerLimit=THREE.MathUtils.lerp(.46,.17,Math.min(absSpeed/33,1))*(1-wetness*.07);
+    // Speed-sensitive bicycle steering, now with yaw inertia and load-sensitive understeer.
+    const steerLimit=THREE.MathUtils.lerp(.47,.165,Math.min(newAbsSpeed/34,1));
     const wheelbase=2.68;
-    if(absSpeed>.10){
+    const understeer=1/(1+Math.pow(newAbsSpeed/28,2)*Math.abs(steer)*.72);
+    const gripYaw=THREE.MathUtils.lerp(.58,1,roadGrip)*understeer;
+    let targetYawVelocity=0;
+    if(newAbsSpeed>.10){
       const rawYawRate=(speedMps/wheelbase)*Math.tan(steer*steerLimit);
-      const yawRate=THREE.MathUtils.clamp(rawYawRate,-1.75,1.75);
-      // Camera faces the car's +Z direction from behind; subtracting yaw makes a rightward thumb slide turn right on screen.
-      car.rotation.y-=yawRate*dt;
+      // Negative world yaw is a right turn in DriveSG's +Z-forward coordinate system.
+      targetYawVelocity=-THREE.MathUtils.clamp(rawYawRate,-1.72,1.72)*gripYaw;
     }
+    const yawResponse=THREE.MathUtils.lerp(4.4,8.2,roadGrip);
+    yawVelocity+=(targetYawVelocity-yawVelocity)*Math.min(1,dt*yawResponse);
+    car.rotation.y+=yawVelocity*dt;
+
+    // Lateral velocity makes fast direction changes feel like tyres rather than a rotating camera rig.
+    // Low grip creates a small outward slip which is then scrubbed away by tyre cornering force.
+    const slipGeneration=Math.max(0,newAbsSpeed-6)*Math.abs(steer)*(.035+wetness*.075+(onRoad?0:.13));
+    if(newAbsSpeed>3)lateralSlipMps+=(-Math.sign(steer||yawVelocity||1))*slipGeneration*dt;
+    const lateralGripRate=THREE.MathUtils.lerp(2.45,7.8,roadGrip)/(1+newAbsSpeed*.012);
+    lateralSlipMps*=Math.exp(-lateralGripRate*dt);
+    lateralSlipMps=THREE.MathUtils.clamp(lateralSlipMps,-4.8,4.8);
+    tyreSlip=THREE.MathUtils.clamp(Math.abs(lateralSlipMps)/Math.max(newAbsSpeed,3)*2.1+Math.abs(targetYawVelocity-yawVelocity)*.34,0,1.4);
 
     steeringVisual+=(steer-steeringVisual)*Math.min(1,dt*11);
-    const longitudinalTarget=(brake>0?.030:0)-(gas>0?.014:0);
-    longitudinalVisual+=(longitudinalTarget-longitudinalVisual)*Math.min(1,dt*7);
+    const longitudinalAccel=(speedMps-lastPhysicsSpeedMps)/Math.max(dt,.008);
+    lastPhysicsSpeedMps=speedMps;
+    const pitchTarget=THREE.MathUtils.clamp(-longitudinalAccel*.0055,-.055,.07);
+    longitudinalVisual+=(pitchTarget-longitudinalVisual)*Math.min(1,dt*7.5);
+
+    // A tiny sprung-mass model combines road elevation transitions and surface roughness.
+    const roughAmplitude=(onRoad?.0045:.030)*Math.min(newAbsSpeed/18,1);
+    const roughWave=(Math.sin(elapsed*(onRoad?19:13)+car.position.x*.07)+Math.sin(elapsed*(onRoad?27:18)+car.position.z*.05)*.55)*roughAmplitude;
+    const springTarget=roughWave+roadShock*.045;
+    const springForce=(springTarget-suspensionHeave)*42-suspensionHeaveVel*9.2;
+    suspensionHeaveVel+=springForce*dt;suspensionHeave+=suspensionHeaveVel*dt;
+    roadShock*=Math.exp(-8.5*dt);
+
     if(carBody){
-      carBody.rotation.z=-steeringVisual*.029*Math.min(absSpeed/8,1);
+      const lateralG=THREE.MathUtils.clamp(yawVelocity*speedMps/9.81,-1.35,1.35);
+      carBody.rotation.z=THREE.MathUtils.clamp(lateralG*.040,-.065,.065)-steeringVisual*.009;
       carBody.rotation.x=longitudinalVisual;
+      carBody.position.y=.75+suspensionHeave;
     }
     frontWheels.forEach(p=>p.rotation.y=-steeringVisual*.36);
     const wheelSpin=speedMps*dt/.35;
@@ -2741,32 +2853,38 @@
     if(tailLightMaterial) tailLightMaterial.emissiveIntensity=brake>0?3.0:.65;
 
     const beforeX=car.position.x,beforeZ=car.position.z;
-    const fx=Math.sin(car.rotation.y),fz=Math.cos(car.rotation.y);
-    car.position.x+=fx*speedMps*dt;
-    car.position.z+=fz*speedMps*dt;
+    const fx=Math.sin(car.rotation.y),fz=Math.cos(car.rotation.y),rightX=fz,rightZ=-fx;
+    car.position.x+=(fx*speedMps+rightX*lateralSlipMps)*dt;
+    car.position.z+=(fz*speedMps+rightZ*lateralSlipMps)*dt;
 
     const collision=carHitsBuilding(car.position.x,car.position.z,carRoadY)||carHitsTraffic(car.position.x,car.position.z,carRoadY)||carHitsWater(car.position.x,car.position.z,carRoadY);
     if(collision){
-      car.position.x=beforeX;
-      car.position.z=beforeZ;
-      speedMps*=-.08;
+      car.position.x=beforeX;car.position.z=beforeZ;
+      const impact=Math.min(1,newAbsSpeed/18);
+      speedMps*=-THREE.MathUtils.lerp(.04,.15,impact);
+      lateralSlipMps*=-.28;
+      yawVelocity+=THREE.MathUtils.clamp(steer*.22,-.18,.18);
+      cameraShake=Math.max(cameraShake,.30+impact*.58);
+      roadShock=Math.max(roadShock,.65);
+      playCollisionThump();
       recordChallengeCollision(elapsed);
     }
 
     const elevationHit=nearestRoadHit(car.position.x,car.position.z,false);
     const elevationTarget=elevationHit&&elevationHit.dist<elevationHit.seg.width/2+4?segmentYAt(elevationHit.seg,elevationHit.t):0;
-    carRoadY+=(elevationTarget-carRoadY)*Math.min(1,dt*(elevationTarget>carRoadY?2.2:1.45));
-    car.position.y=.07+carRoadY;
+    const elevationStep=Math.abs(elevationTarget-lastElevationTarget);
+    if(elevationStep>.035&&newAbsSpeed>4)roadShock=Math.max(roadShock,THREE.MathUtils.clamp(elevationStep*.9,0,.65));
+    lastElevationTarget=elevationTarget;
+    carRoadY+=(elevationTarget-carRoadY)*Math.min(1,dt*(elevationTarget>carRoadY?2.4:1.55));
+    car.position.y=.07+carRoadY+suspensionHeave*.18;
 
     const coords=unproject(car.position.x,car.position.z);
     if(!insideSingapore(coords.lat,coords.lon)){
-      car.position.x=beforeX;
-      car.position.z=beforeZ;
-      speedMps*=.15;
+      car.position.x=beforeX;car.position.z=beforeZ;speedMps*=.15;lateralSlipMps=0;yawVelocity=0;
       showToast('Singapore boundary reached');
     }else if(!panelOpen){
       const moved=Math.hypot(car.position.x-beforeX,car.position.z-beforeZ);
-      if(moved<4) sessionDistanceM+=moved;
+      if(moved<5) sessionDistanceM+=moved;
     }
 
     if(elapsed-lastOnRoadCheck>.18){
@@ -2777,56 +2895,66 @@
       els.surfaceState.textContent=onRoad?'ON ROAD':'OFF ROAD';
       els.surfaceState.classList.toggle('offroad',!onRoad);
       const label=hit?.seg?.name || (onRoad?'Singapore road':'Off road');
-      if(label!==lastRoadLabel){
-        lastRoadLabel=label;
-        if(els.roadName)els.roadName.textContent=label;
-      }
+      if(label!==lastRoadLabel){lastRoadLabel=label;if(els.roadName)els.roadName.textContent=label;}
       const limit=onRoad?(hit?.seg?.speedLimit||null):null;
       if(limit!==lastSpeedLimit){
         lastSpeedLimit=limit;
-        if(els.speedLimit){
-          els.speedLimit.classList.toggle('hidden',!limit);
-          if(limit)els.speedLimit.textContent=String(limit);
-        }
+        if(els.speedLimit){els.speedLimit.classList.toggle('hidden',!limit);if(limit)els.speedLimit.textContent=String(limit);}
       }
     }
 
-    const speedKmh=Math.round(absSpeed*3.6);
+    const speedKmh=Math.round(newAbsSpeed*3.6);
     sessionTopSpeedKmh=Math.max(sessionTopSpeedKmh,speedKmh);
     els.speed.textContent=speedKmh;
     els.gear.textContent=speedMps<-.25?'R':'D';
     document.querySelector('.drive-hud')?.classList.toggle('speeding',Boolean(lastSpeedLimit&&speedKmh>lastSpeedLimit+5));
     if(els.tripDistance)els.tripDistance.textContent=formatTripDistance(sessionDistanceM);
     if(els.topSpeed)els.topSpeed.textContent=String(sessionTopSpeedKmh);
+    updateDynamicsHud();
   }
 
-  function updateCamera(dt) {
-    const fx=Math.sin(car.rotation.y),fz=Math.cos(car.rotation.y);
+  function updateCamera(dt,elapsed) {
+    const fx=Math.sin(car.rotation.y),fz=Math.cos(car.rotation.y),sideX=fz,sideZ=-fx;
     const speedRatio=Math.min(Math.abs(speedMps)/35,1);
-    const back=THREE.MathUtils.lerp(12.2,15.0,speedRatio);
-    const height=THREE.MathUtils.lerp(5.9,6.8,speedRatio);
-    const lookAhead=THREE.MathUtils.lerp(4.7,8.0,speedRatio);
-    const sideX=fz,sideZ=-fx;
-    const anticipation=steeringVisual*THREE.MathUtils.lerp(.25,1.25,speedRatio);
-    const desired=new THREE.Vector3(
-      car.position.x-fx*back+sideX*anticipation,
-      car.position.y+height,
-      car.position.z-fz*back+sideZ*anticipation
-    );
-    const target=new THREE.Vector3(
-      car.position.x+fx*lookAhead-sideX*anticipation*.45,
-      car.position.y+1.62,
-      car.position.z+fz*lookAhead-sideZ*anticipation*.45
-    );
-    const alpha=1-Math.pow(.0028,dt);
-    camera.position.lerp(desired,alpha);
-    camera.lookAt(target);
+    const anticipation=steeringVisual*THREE.MathUtils.lerp(.22,1.2,speedRatio);
+    const shakeDecay=Math.exp(-5.4*dt);cameraShake*=shakeDecay;
+    const roadShake=(onRoad?.010:.055)*speedRatio+(wetness*.006*speedRatio);
+    const shakeX=(Math.sin(elapsed*37.1)+Math.sin(elapsed*61.7)*.38)*roadShake+Math.sin(elapsed*53)*cameraShake*.055;
+    const shakeY=(Math.sin(elapsed*41.3+.7)+Math.sin(elapsed*73.2)*.24)*roadShake+Math.cos(elapsed*47)*cameraShake*.075;
 
-    const desiredFov=59+speedRatio*5.5;
-    if(Math.abs(camera.fov-desiredFov)>.02){
-      camera.fov+= (desiredFov-camera.fov)*Math.min(1,dt*3.5);
-      camera.updateProjectionMatrix();
+    let desired,target,desiredFov;
+    if(cameraMode==='hood'){
+      desired=new THREE.Vector3(
+        car.position.x+fx*1.18+sideX*shakeX*.18,
+        car.position.y+1.48+shakeY*.22,
+        car.position.z+fz*1.18+sideZ*shakeX*.18
+      );
+      target=new THREE.Vector3(
+        car.position.x+fx*THREE.MathUtils.lerp(18,28,speedRatio)-sideX*anticipation*.55,
+        car.position.y+1.12+shakeY*.08,
+        car.position.z+fz*THREE.MathUtils.lerp(18,28,speedRatio)-sideZ*anticipation*.55
+      );
+      desiredFov=64+speedRatio*4.5;
+    }else{
+      const back=THREE.MathUtils.lerp(12.2,15.0,speedRatio),height=THREE.MathUtils.lerp(5.9,6.8,speedRatio),lookAhead=THREE.MathUtils.lerp(4.7,8.0,speedRatio);
+      desired=new THREE.Vector3(
+        car.position.x-fx*back+sideX*(anticipation+shakeX),
+        car.position.y+height+shakeY,
+        car.position.z-fz*back+sideZ*(anticipation+shakeX)
+      );
+      target=new THREE.Vector3(
+        car.position.x+fx*lookAhead-sideX*anticipation*.45,
+        car.position.y+1.62+shakeY*.15,
+        car.position.z+fz*lookAhead-sideZ*anticipation*.45
+      );
+      desiredFov=59+speedRatio*5.5;
     }
+
+    const alpha=1-Math.pow(cameraMode==='hood'?.0012:.0028,dt);
+    camera.position.lerp(desired,alpha);camera.lookAt(target);
+    const cameraRoll=THREE.MathUtils.clamp(-yawVelocity*speedRatio*.022,-.030,.030)+shakeX*.018;
+    camera.rotateZ(cameraRoll);
+    if(Math.abs(camera.fov-desiredFov)>.02){camera.fov+=(desiredFov-camera.fov)*Math.min(1,dt*3.8);camera.updateProjectionMatrix();}
 
     const sunProgress=THREE.MathUtils.clamp((lightingSunHour-6)/13,0,1),sunAngle=sunProgress*Math.PI,azimuth=(lightingSunHour/24)*Math.PI*2+.7;
     const sunHeight=Math.max(28,Math.sin(sunAngle)*190),sunRadius=155;
@@ -2889,7 +3017,7 @@
     updateCar(dt,elapsed);
     updateChallenge(dt,elapsed);
     updateNavigation(elapsed);
-    updateCamera(dt);
+    updateCamera(dt,elapsed);
     maybeStreamWorld(elapsed);
     maybePrefetchRouteAhead(elapsed);
     paintMiniMap(elapsed);
@@ -2938,6 +3066,7 @@
     els.resetBtn.addEventListener('click',resetCar);
     els.lightingBtn?.addEventListener('click',cycleLightingMode);
     els.soundBtn.addEventListener('click',toggleEngineSound);
+    els.cameraBtn?.addEventListener('click',cycleCameraMode);
     els.cancelNavBtn.addEventListener('click',()=>{if(challenge.active)cancelChallenge();else clearNavigation();});
     els.navigateModeBtn.addEventListener('click',()=>setPlaceMode('navigate'));
     els.startModeBtn.addEventListener('click',()=>setPlaceMode('start'));
@@ -2981,6 +3110,7 @@
       if(e.key==='ArrowLeft'||e.key.toLowerCase()==='a'){input.steer=-1;updateSteerKnob(-1);}
       if(e.key==='ArrowRight'||e.key.toLowerCase()==='d'){input.steer=1;updateSteerKnob(1);}
       if(e.key.toLowerCase()==='r')resetCar();
+      if(e.key.toLowerCase()==='c')cycleCameraMode();
     },{passive:false});
     window.addEventListener('keyup',e=>{
       if(e.key==='ArrowUp'||e.key.toLowerCase()==='w')input.gas=0;
