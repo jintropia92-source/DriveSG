@@ -1,5 +1,72 @@
 (() => {
   'use strict';
+  const BUILD_ID = '20260901final1';
+  const isServiceWorker = typeof ServiceWorkerGlobalScope !== 'undefined' && self instanceof ServiceWorkerGlobalScope;
+
+  if (isServiceWorker) {
+    const CACHE = `drivesg-shell-${BUILD_ID}`;
+    const shell = [
+      './',
+      './index.html',
+      `./styles.css?b=${BUILD_ID}`,
+      `./app.js?b=${BUILD_ID}`,
+      `./boot.js?b=${BUILD_ID}`
+    ];
+    const optionalRuntime = [
+      'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js'
+    ];
+
+    self.addEventListener('install', event => {
+      event.waitUntil(
+        caches.open(CACHE)
+          .then(async cache => {
+            await Promise.all(shell.map(url => cache.add(url).catch(() => {})));
+            await Promise.all(optionalRuntime.map(url => cache.add(url).catch(() => {})));
+          })
+          .catch(() => {})
+          .then(() => self.skipWaiting())
+      );
+    });
+
+    self.addEventListener('activate', event => {
+      event.waitUntil(
+        caches.keys()
+          .then(keys => Promise.all(keys.filter(k => k.startsWith('drivesg-shell-') && k !== CACHE).map(k => caches.delete(k))))
+          .then(() => self.clients.claim())
+      );
+    });
+
+    self.addEventListener('fetch', event => {
+      const req = event.request;
+      if (req.method !== 'GET') return;
+      const url = new URL(req.url);
+      const sameOrigin = url.origin === self.location.origin;
+      const isShell = sameOrigin && (
+        req.mode === 'navigate' ||
+        /\/(?:index\.html|styles\.css|app\.js|boot\.js)$/.test(url.pathname)
+      );
+      const isThree = /^(?:cdn\.jsdelivr\.net|cdnjs\.cloudflare\.com|unpkg\.com)$/.test(url.hostname);
+      if (!isShell && !isThree) return;
+
+      event.respondWith((async () => {
+        const cache = await caches.open(CACHE);
+        try {
+          const fresh = await fetch(req);
+          if (fresh && (fresh.ok || fresh.type === 'opaque')) cache.put(req, fresh.clone()).catch(() => {});
+          return fresh;
+        } catch (_) {
+          const cached = await cache.match(req);
+          if (cached) return cached;
+          if (req.mode === 'navigate') {
+            return (await cache.match('./')) || (await cache.match('./index.html'));
+          }
+          throw _;
+        }
+      })());
+    });
+    return;
+  }
+
   const sources = [
     'https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js',
     'https://cdnjs.cloudflare.com/ajax/libs/three.js/0.160.0/three.min.js',
@@ -37,7 +104,7 @@
     }
 
     try {
-      await loadScript('app.js?b=20260901traffic1');
+      await loadScript(`app.js?b=${BUILD_ID}`);
     } catch (err) {
       console.error(err);
       if (title) title.textContent = 'DriveSG could not start';

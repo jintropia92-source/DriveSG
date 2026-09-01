@@ -10,7 +10,7 @@
   <meta name="format-detection" content="telephone=no" />
   <meta name="color-scheme" content="dark" />
   <title>DriveSG — Singapore, playable.</title>
-  <link rel="stylesheet" href="styles.css?b=20260901traffic1" />
+  <link rel="stylesheet" href="styles.css?b=20260901final1" />
   <script>window.DRIVESG_CONFIG={backendBase:'https://drivesg-api.vercel.app'};</script>
 </head>
 <body>
@@ -113,6 +113,7 @@
       <div class="panel-foot">
         <span class="status-dot"></span>
         <span>DriveSG backend · OpenStreetMap world · Singapore only</span>
+        <button id="shareBtn" class="panel-share" type="button">Share / Install</button>
       </div>
     </aside>
 
@@ -182,6 +183,11 @@
       </div>
     </section>
 
+    <div id="speedFx" class="speed-fx" aria-hidden="true">
+      <div id="speedVignette" class="speed-vignette"></div>
+      <div id="rainGlass" class="rain-glass"></div>
+    </div>
+
     <div id="loader" class="loader-wrap">
       <div class="loader-card">
         <div class="loader-logo">SG</div>
@@ -194,9 +200,9 @@
 
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
-    <footer class="attribution"><a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">© OpenStreetMap</a><span id="routingCredit"></span></footer>
+    <footer class="attribution"><a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">© OpenStreetMap</a><span class="attr-sep">·</span><span class="onemap-credit"><img src="https://www.onemap.gov.sg/web-assets/images/logo/om_logo.png" alt="" /><a href="https://www.onemap.gov.sg/" target="_blank" rel="noopener">OneMap</a> © contributors | <a href="https://www.sla.gov.sg/" target="_blank" rel="noopener">Singapore Land Authority</a></span><span id="routingCredit"></span></footer>
   </main>
 
-  <script src="boot.js?b=20260901traffic1"></script>
+  <script src="boot.js?b=20260901final1"></script>
 </body>
 </html>

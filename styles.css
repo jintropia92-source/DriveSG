@@ -510,3 +510,66 @@ body.panel-open .challenge-hud{opacity:.08}
 @media (orientation:landscape) and (max-width:690px){
   .round-action{width:39px;height:39px;border-radius:13px;font-size:17px}.top-actions{gap:5px}.place-pill{min-width:160px;max-width:43vw;min-height:39px}.place-copy strong{font-size:12px}.place-copy small{font-size:7px}
 }
+
+
+/* Phase 3 — authoritative Singapore data attribution */
+.attribution{display:flex;align-items:center;gap:4px;max-width:min(56vw,520px);white-space:nowrap}
+.attribution .attr-sep{opacity:.45}
+.onemap-credit{display:inline-flex;align-items:center;gap:2px}
+.onemap-credit img{width:10px;height:10px;object-fit:contain;vertical-align:middle;border-radius:2px}
+@media (max-width:760px){.onemap-credit{font-size:6px}.onemap-credit img{width:8px;height:8px}.attribution{gap:3px;max-width:52vw}}
+
+
+/* Phase 4 — presentation/performance effects. These overlays are intentionally CSS-only
+   so they cost virtually no WebGL draw calls on mobile Safari. */
+.speed-fx {
+  position: fixed;
+  inset: 0;
+  z-index: 18;
+  pointer-events: none;
+  overflow: hidden;
+}
+.speed-vignette {
+  position: absolute;
+  inset: -8%;
+  opacity: 0;
+  background:
+    radial-gradient(ellipse at 50% 53%, transparent 43%, rgba(4,9,12,.05) 61%, rgba(2,6,9,.46) 100%);
+  transform: scale(1.05);
+  transition: opacity .18s linear;
+  will-change: opacity, transform;
+}
+.rain-glass {
+  position: absolute;
+  inset: -12% -4%;
+  opacity: 0;
+  background:
+    repeating-linear-gradient(103deg,
+      transparent 0 28px,
+      rgba(205,232,244,.09) 29px,
+      transparent 30px 64px);
+  filter: blur(.25px);
+  transform: translate3d(0,-3%,0);
+  animation: rainGlassSweep .72s linear infinite;
+  will-change: opacity, transform;
+}
+@keyframes rainGlassSweep {
+  to { transform: translate3d(-1.2%,7%,0); }
+}
+html[data-graphics-tier="performance"] .rain-glass { animation-duration: 1.05s; }
+html[data-graphics-tier="performance"] .speed-vignette { filter: none; }
+
+.panel-foot { flex-wrap: wrap; }
+.panel-foot > span:nth-child(2) { flex: 1 1 auto; min-width: 170px; }
+.panel-share {
+  margin-left: auto;
+  padding: 6px 9px;
+  border: 1px solid rgba(255,255,255,.12);
+  border-radius: 9px;
+  background: rgba(255,255,255,.055);
+  color: rgba(255,255,255,.70);
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: .035em;
+}
+.panel-share:active { background: rgba(255,255,255,.12); transform: scale(.98); }

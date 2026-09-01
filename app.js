@@ -1,6 +1,7 @@
 (() => {
   'use strict';
 
+  const BUILD_ID = '20260901final1';
   const SG_BOUNDS = { minLat: 1.16, maxLat: 1.456, minLon: 103.60, maxLon: 104.10 };
   const CONFIG = window.DRIVESG_CONFIG || {};
   const OVERPASS_ENDPOINTS = Array.isArray(CONFIG.overpassEndpoints) && CONFIG.overpassEndpoints.length
@@ -12,6 +13,11 @@
   const GEOCODE_ENDPOINT = CONFIG.geocodeEndpoint || 'https://nominatim.openstreetmap.org/search';
   const BACKEND_BASE = String(CONFIG.backendBase || '').replace(/\/$/, '');
   const BACKEND_ACTIVE = Boolean(BACKEND_BASE);
+  const BACKEND_CIRCUIT_SECONDS = 45;
+  const ONEMAP_TILE_BASE = 'https://www.onemap.gov.sg/maps/tiles/Default';
+  const ONEMAP_MIN_ZOOM = 11;
+  const ONEMAP_MAX_ZOOM = 19;
+  const ONEMAP_TILE_SIZE = 256;
   const ENVIRONMENT_REFRESH_SECONDS = 240;
   const TRAFFIC_REFRESH_SECONDS = 75;
   const ROUTE_OFFTRACK_METERS = 52;
@@ -22,8 +28,16 @@
   const ROUTE_PREFETCH_INTERVAL = 12;
   const MAX_BUILDING_WINDOWS = 9200;
   const MAX_FACADE_BUILDINGS = 280;
+  const MAX_FACADE_DETAILS = 5200;
+  const MAX_ROAD_NAME_SIGNS = 14;
+  const MAX_TROPICAL_PLANTS = 125;
   const MAX_STREET_LIGHTS = 180;
   const BRIDGE_BASE_HEIGHT = 5.4;
+  const PERFORMANCE_TARGET_FPS = 50;
+  const GRAPHICS_TIER_COOLDOWN = 8;
+  const RAIN_PARTICLES_HIGH = 760;
+  const RAIN_PARTICLES_BALANCED = 520;
+  const RAIN_PARTICLES_PERFORMANCE = 300;
 
   const PRESETS = [
     { name: 'Marina Bay', subtitle: 'Skyline & waterfront', lat: 1.2829, lon: 103.8587 },
@@ -57,7 +71,15 @@
     { name: 'ION Orchard', lat: 1.3040, lon: 103.8319, kind: 'ion' },
     { name: 'Ngee Ann City', lat: 1.3028, lon: 103.8348, kind: 'ngeeann' },
     { name: 'Orchard Gateway', lat: 1.3007, lon: 103.8396, kind: 'orchardgateway' },
-    { name: 'Jewel Changi Airport', lat: 1.3602, lon: 103.9896, kind: 'jewel' }
+    { name: 'Jewel Changi Airport', lat: 1.3602, lon: 103.9896, kind: 'jewel' },
+    { name: 'The Pinnacle@Duxton', lat: 1.2775, lon: 103.8412, kind: 'pinnacle' },
+    { name: 'Singapore Sports Hub', lat: 1.3040, lon: 103.8748, kind: 'sportshub' },
+    { name: 'HDB Hub', lat: 1.3320, lon: 103.8479, kind: 'hdbhub' },
+    { name: 'National Gallery Singapore', lat: 1.2906, lon: 103.8516, kind: 'gallery' },
+    { name: 'Raffles Hotel', lat: 1.2949, lon: 103.8546, kind: 'raffleshotel' },
+    { name: 'VivoCity', lat: 1.2644, lon: 103.8222, kind: 'vivocity' },
+    { name: 'Helix Bridge', lat: 1.2876, lon: 103.8603, kind: 'helix' },
+    { name: 'OCBC Centre', lat: 1.2854, lon: 103.8498, kind: 'ocbc' }
   ];
 
   const ROAD_WIDTHS = {
@@ -110,6 +132,15 @@
   let fpsWindowStart = performance.now();
   let qualityPixelRatio = Math.min(window.devicePixelRatio || 1, 1.45);
   let basePixelRatio = qualityPixelRatio;
+  let graphicsTier = 'high';
+  let fpsSmoothed = 60;
+  let qualityLowWindows = 0;
+  let qualityHighWindows = 0;
+  let lastGraphicsTierChange = -Infinity;
+  let lastShaderWarmup = -Infinity;
+  let backendFailureCount = 0;
+  let backendCircuitUntil = 0;
+  let guardsInstalled = false;
   let mapMode = 'live';
   let sessionDistanceM = 0;
   let sessionTopSpeedKmh = 0;
@@ -159,6 +190,9 @@
   let lastIncidentToastKey = '';
   const mapCache = new Map();
   const geocodeCache = new Map();
+  const oneMapTileCache = new Map();
+  let oneMapTilesEnabled = true;
+  let oneMapTileFailures = 0;
   let challenge = makeEmptyChallenge();
   let lastChallengeId = '';
   // Driving-dynamics state. We keep the proven scalar forward-speed model but add
@@ -267,11 +301,16 @@
     loaderText: document.getElementById('loaderText'),
     progressBar: document.getElementById('progressBar'),
     progressLabel: document.getElementById('progressLabel'),
-    toast: document.getElementById('toast')
+    toast: document.getElementById('toast'),
+    speedFx: document.getElementById('speedFx'),
+    speedVignette: document.getElementById('speedVignette'),
+    rainGlass: document.getElementById('rainGlass'),
+    shareBtn: document.getElementById('shareBtn')
   };
 
   async function init() {
     if (!window.THREE) return;
+    installProductionGuards();
     buildPresetButtons();
     buildRecentDestinations();
     buildChallengeButtons();
@@ -288,8 +327,10 @@
     updateCameraButton();
     setPlaceMode('navigate');
     initThree();
+    initialiseGraphicsTier();
     createCar();
     createRainSystem();
+    refreshProviderStatus();
     registerServiceWorker();
     animate();
 
@@ -318,6 +359,20 @@
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFShadowMap;
     els.game.appendChild(renderer.domElement);
+    renderer.domElement.addEventListener('webglcontextlost',e=>{
+      e.preventDefault();
+      recordDiagnostic('webgl-context-lost','WebGL context lost');
+      clearInputs();
+      showLoader('Graphics paused — recovering…',72);
+    },false);
+    renderer.domElement.addEventListener('webglcontextrestored',()=>{
+      recordDiagnostic('webgl-context-restored','WebGL context restored');
+      renderer.resetState?.();
+      warmSceneShaders();
+      setProgress(100,'Graphics recovered');
+      setTimeout(hideLoader,320);
+      showToast('Graphics recovered');
+    },false);
 
     hemi = new THREE.HemisphereLight(0xeaf5f8, 0x4b5a46, 2.35);
     scene.add(hemi);
@@ -380,8 +435,15 @@
     ];
     shared.windows = new THREE.MeshStandardMaterial({ color: 0x263842, emissive: 0x14232d, emissiveIntensity: .08, roughness: .28, metalness: .12, side: THREE.DoubleSide });
     shared.storefront = new THREE.MeshStandardMaterial({ color: 0x395967, emissive: 0x20343e, emissiveIntensity: .12, roughness: .24, metalness: .10, side: THREE.DoubleSide });
+    shared.hdbCorridor = new THREE.MeshStandardMaterial({ color: 0xd9d4c8, roughness: .84, metalness: 0, side: THREE.DoubleSide });
+    shared.officeBand = new THREE.MeshStandardMaterial({ color: 0x405d6b, emissive: 0x152833, emissiveIntensity: .06, roughness: .26, metalness: .14, side: THREE.DoubleSide });
+    shared.awning = new THREE.MeshStandardMaterial({ color: 0x8f4f42, roughness: .78, metalness: 0, side: THREE.DoubleSide });
+    shared.markingYellow = new THREE.MeshBasicMaterial({ color: 0xe8ca58, transparent: true, opacity: .92, depthWrite: false, side: THREE.DoubleSide });
+    shared.islandKerb = new THREE.MeshStandardMaterial({ color: 0xe0dfd7, roughness: .9, metalness: 0, side: THREE.DoubleSide });
     shared.treeTrunk = new THREE.MeshStandardMaterial({ color: 0x625341, roughness: 1 });
     shared.treeLeaf = new THREE.MeshStandardMaterial({ color: 0x567459, roughness: 1 });
+    shared.treeLeafLight = new THREE.MeshStandardMaterial({ color: 0x668668, roughness: 1 });
+    shared.palmLeaf = new THREE.MeshStandardMaterial({ color: 0x4f7354, roughness: .94, side: THREE.DoubleSide });
     shared.signalPole = new THREE.MeshStandardMaterial({ color: 0x3d4142, roughness: .92 });
     shared.signalHead = new THREE.MeshStandardMaterial({ color: 0x15191a, roughness: .82 });
     shared.signalRed = new THREE.MeshStandardMaterial({ color: 0x8e2c2f, emissive: 0x250506, emissiveIntensity: .55, roughness: .65 });
@@ -389,6 +451,8 @@
     shared.signalGreen = new THREE.MeshStandardMaterial({ color: 0x3d7c57, emissive: 0x061d0e, emissiveIntensity: .32, roughness: .65 });
     shared.busStopPole = new THREE.MeshStandardMaterial({ color: 0x545a5c, roughness: .9 });
     shared.busStopSign = new THREE.MeshStandardMaterial({ color: 0x2d6e94, roughness: .72 });
+    shared.busShelterRoof = new THREE.MeshStandardMaterial({ color: 0x6f7777, roughness: .74, metalness: .04 });
+    shared.busShelterGlass = new THREE.MeshStandardMaterial({ color: 0x75929b, roughness: .28, metalness: .08, transparent: true, opacity: .54, side: THREE.DoubleSide });
     shared.streetPole = new THREE.MeshStandardMaterial({ color: 0x555b5c, roughness: .9 });
     shared.streetLamp = new THREE.MeshStandardMaterial({ color: 0xe8dfc2, emissive: 0xffd98a, emissiveIntensity: .12, roughness: .5 });
     shared.gantryPole = new THREE.MeshStandardMaterial({ color: 0x606769, roughness: .88 });
@@ -476,6 +540,52 @@
     scene.add(car);
   }
 
+  function noteBackendFailure(){
+    backendFailureCount++;
+    if(backendFailureCount>=2){
+      backendCircuitUntil=performance.now()+BACKEND_CIRCUIT_SECONDS*1000;
+      backendFailureCount=0;
+    }
+  }
+
+  async function backendFetch(path,options={}){
+    if(!BACKEND_ACTIVE)throw new Error('DriveSG backend disabled');
+    if(performance.now()<backendCircuitUntil)throw new Error('DriveSG backend temporarily bypassed');
+    const controller=new AbortController();
+    const parentSignal=options.signal;
+    const abortFromParent=()=>controller.abort();
+    if(parentSignal?.aborted)controller.abort();
+    else parentSignal?.addEventListener?.('abort',abortFromParent,{once:true});
+    const timeout=setTimeout(()=>controller.abort(),path.startsWith('/api/map')?8500:4800);
+    try{
+      const res=await fetch(`${BACKEND_BASE}${path}`,{...options,signal:controller.signal});
+      if(res.ok)backendFailureCount=0;
+      else if(res.status>=500)noteBackendFailure();
+      return res;
+    }catch(err){
+      noteBackendFailure();
+      throw err;
+    }finally{
+      clearTimeout(timeout);
+      parentSignal?.removeEventListener?.('abort',abortFromParent);
+    }
+  }
+
+  function nextPaint(){
+    return new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
+  }
+
+  async function warmSceneShaders(){
+    if(!renderer||!scene||!camera)return;
+    const now=performance.now();
+    if(now-lastShaderWarmup<12000)return;
+    lastShaderWarmup=now;
+    try{
+      if(typeof renderer.compileAsync==='function')await renderer.compileAsync(scene,camera);
+      else renderer.compile(scene,camera);
+    }catch(_){/* shader warm-up is best effort */}
+  }
+
   async function loadLocation(place, options = {}) {
     if(challenge.active&&!options.preserveChallenge)cancelChallenge({quiet:true,keepNavigation:true});
     if(navigation.active||navigation.routeGroup)clearNavigation({quiet:true});
@@ -499,13 +609,16 @@
 
     try {
       setProgress(16, 'Fetching nearby Singapore roads…');
+      await nextPaint();
       const data = await fetchOsmData(place.lat, place.lon);
       if (generation !== streamGeneration) return;
       setProgress(52, 'Drawing real road and building geometry…');
+      await nextPaint();
       const built = buildWorld(data, { centerX: 0, centerZ: 0 });
       if (built.roadCount < 3) throw new Error('Not enough road geometry');
       setProgress(86, `${built.roadCount} roads · ${built.buildingCount} building footprints`);
       swapDynamicWorld(built);
+      warmSceneShaders();
       loadedCenterWorld = { x: 0, z: 0 };
       placeCarNear(0, 0, true);
       savePlace(place);
@@ -543,8 +656,8 @@
     if(BACKEND_ACTIVE){
       const controller=new AbortController(),timeoutId=setTimeout(()=>controller.abort(),18000);
       try{
-        const url=`${BACKEND_BASE}/api/map?lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lon)}&roadRadius=${ROAD_RADIUS_METERS}&buildingRadius=${BUILDING_RADIUS_METERS}&surfaceRadius=${SURFACE_RADIUS_METERS}&signalRadius=${SIGNAL_RADIUS_METERS}`;
-        const res=await fetch(url,{headers:{Accept:'application/json'},signal:controller.signal});
+        const path=`/api/map?lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lon)}&roadRadius=${ROAD_RADIUS_METERS}&buildingRadius=${BUILDING_RADIUS_METERS}&surfaceRadius=${SURFACE_RADIUS_METERS}&signalRadius=${SIGNAL_RADIUS_METERS}`;
+        const res=await backendFetch(path,{headers:{Accept:'application/json'},signal:controller.signal});
         if(res.ok){
           const json=await res.json();
           if(json?.elements?.length){json._driveCenter=json._driveCenter||{lat,lon};mapCache.set(cacheKey,json);while(mapCache.size>6)mapCache.delete(mapCache.keys().next().value);return json;}
@@ -615,7 +728,7 @@
       active:false, mode:'idle', fetching:false, destination:null,
       routeCoords:[], routeWorld:[], cumulativeM:[], totalM:0, durationS:0,
       steps:[], progressM:0, remainingM:0, remainingS:0, nearestIndex:0,
-      nearestDistance:Infinity, routeGroup:null, lastRerouteAt:-Infinity,
+      nearestDistance:Infinity, routeGroup:null, lastRerouteAt:-Infinity, trafficMultiplier:1, trafficLabel:'',
       lastInstructionKey:'', arrived:false
     };
   }
@@ -665,11 +778,14 @@
     const controller=new AbortController();
     const timeoutId=setTimeout(()=>controller.abort(),12000);
     try{
-      const url=BACKEND_ACTIVE
-        ?`${BACKEND_BASE}/api/route?startLat=${encodeURIComponent(start.lat)}&startLon=${encodeURIComponent(start.lon)}&endLat=${encodeURIComponent(destination.lat)}&endLon=${encodeURIComponent(destination.lon)}`
-        :`${ROUTE_ENDPOINT}/${start.lon},${start.lat};${destination.lon},${destination.lat}?steps=true&geometries=geojson&overview=full&alternatives=false`;
-      let res=await fetch(url,{headers:{Accept:'application/json'},signal:controller.signal});
-      if(!res.ok&&BACKEND_ACTIVE){
+      let res=null;
+      if(BACKEND_ACTIVE){
+        try{
+          const path=`/api/route?startLat=${encodeURIComponent(start.lat)}&startLon=${encodeURIComponent(start.lon)}&endLat=${encodeURIComponent(destination.lat)}&endLon=${encodeURIComponent(destination.lon)}`;
+          res=await backendFetch(path,{headers:{Accept:'application/json'},signal:controller.signal});
+        }catch(err){console.warn('DriveSG route backend bypass',err?.message||err);}
+      }
+      if(!res||!res.ok){
         const fallback=`${ROUTE_ENDPOINT}/${start.lon},${start.lat};${destination.lon},${destination.lat}?steps=true&geometries=geojson&overview=full&alternatives=false`;
         res=await fetch(fallback,{headers:{Accept:'application/json'},signal:controller.signal});
       }
@@ -706,6 +822,7 @@
     }
     navigation.totalM=Number(route.distance)||sum;
     navigation.durationS=Math.max(1,Number(route.duration)||navigation.totalM/11);
+    navigation.trafficMultiplier=1;navigation.trafficLabel='';
     navigation.progressM=0;
     navigation.remainingM=navigation.totalM;
     navigation.remainingS=navigation.durationS;
@@ -734,7 +851,7 @@
     navigation.arrived=false;
     navigation.lastInstructionKey='';
     renderNavigationWorld();
-    els.routingCredit.textContent=' · routing by OSRM';
+    els.routingCredit.textContent=` · routing by ${route.provider||'OSRM'}`;
     els.navBanner.classList.add('show');
     updateNavigationUi(0);
   }
@@ -859,7 +976,7 @@
       navigation.progressM=Math.max(navigation.progressM,hit.progressM-12);
       navigation.remainingM=Math.max(0,navigation.totalM-navigation.progressM);
       const ratio=navigation.totalM>0?navigation.remainingM/navigation.totalM:0;
-      navigation.remainingS=Math.max(0,navigation.durationS*ratio);
+      navigation.remainingS=Math.max(0,navigation.durationS*ratio*(navigation.trafficMultiplier||1));
 
       if(hit.distance>ROUTE_OFFTRACK_METERS&&!navigation.fetching&&elapsed-navigation.lastRerouteAt>ROUTE_REROUTE_COOLDOWN){
         navigation.lastRerouteAt=elapsed;
@@ -889,8 +1006,9 @@
       els.navInstruction.textContent=instruction;
       els.navTurnDistance.textContent=formatDistance(distToTurn);
       els.navRemaining.textContent=formatDistance(navigation.remainingM);
-      els.navEta.textContent=navigation.remainingS?formatEta(navigation.remainingS):'';
-      els.miniMapFooter.textContent=`${formatDistance(navigation.remainingM)} · ${navigation.destination.name}`;
+      els.navEta.textContent=navigation.remainingS?`${formatEta(navigation.remainingS)}${navigation.trafficLabel?` · ${navigation.trafficLabel}`:''}`:'';
+      const incidentAhead=nearestIncidentAhead();
+      els.miniMapFooter.textContent=incidentAhead?`⚠ ${incidentAhead.type||'Traffic incident'} · ${formatDistance(incidentAhead.aheadM)} ahead`:`${formatDistance(navigation.remainingM)} · ${navigation.destination.name}${navigation.trafficLabel?` · ${navigation.trafficLabel}`:''}`;
     }else{
       const here=currentCarCoords();
       const bearing=bearingDegrees(here.lat,here.lon,navigation.destination.lat,navigation.destination.lon);
@@ -1245,8 +1363,93 @@
     if(c.width!==w||c.height!==h){c.width=w;c.height=h;}
   }
 
+  function mercatorGlobalPixel(lat,lon,zoom){
+    const n=Math.pow(2,zoom),clampedLat=THREE.MathUtils.clamp(lat,-85.05112878,85.05112878),rad=clampedLat*Math.PI/180;
+    const x=(lon+180)/360*n*ONEMAP_TILE_SIZE;
+    const y=(.5-Math.log((1+Math.sin(rad))/(1-Math.sin(rad)))/(4*Math.PI))*n*ONEMAP_TILE_SIZE;
+    return {x,y};
+  }
+
+  function oneMapMetersPerPixel(lat,zoom){
+    return 156543.03392804097*Math.cos(lat*Math.PI/180)/Math.pow(2,zoom);
+  }
+
+  function chooseOneMapZoom(lat,targetMetersPerPixel){
+    const raw=Math.log2((156543.03392804097*Math.cos(lat*Math.PI/180))/Math.max(.05,targetMetersPerPixel));
+    return THREE.MathUtils.clamp(Math.round(raw),ONEMAP_MIN_ZOOM,ONEMAP_MAX_ZOOM);
+  }
+
+  function oneMapTileCacheLimit(){
+    return graphicsTier==='performance'?48:(graphicsTier==='balanced'?72:96);
+  }
+
+  function requestOneMapTile(z,x,y){
+    const n=Math.pow(2,z),tx=((x%n)+n)%n;
+    if(y<0||y>=n)return null;
+    const key=`${z}/${tx}/${y}`;
+    const cached=oneMapTileCache.get(key);if(cached)return cached;
+    const img=new Image();
+    const entry={img,ready:false,failed:false,lastUsed:performance.now()};oneMapTileCache.set(key,entry);
+    img.decoding='async';
+    img.onload=()=>{entry.ready=true;entry.failed=false;lastMiniMapPaint=-Infinity;};
+    img.onerror=()=>{entry.failed=true;entry.ready=false;oneMapTileFailures++;if(oneMapTileFailures>18)oneMapTilesEnabled=false;};
+    img.src=`${ONEMAP_TILE_BASE}/${z}/${tx}/${y}.png`;
+    while(oneMapTileCache.size>oneMapTileCacheLimit()){
+      const oldest=oneMapTileCache.keys().next().value;oneMapTileCache.delete(oldest);
+    }
+    return entry;
+  }
+
+  function drawOneMapMiniMapBase(ctx,w,h,mapCenterX,mapCenterZ,scale,headingUp,overviewNorthUp,yaw){
+    if(!oneMapTilesEnabled||scale<=0)return false;
+    const centerCoord=unproject(mapCenterX,mapCenterZ),targetMpp=1/scale;
+    if(!insideSingapore(centerCoord.lat,centerCoord.lon))return false;
+    const zoom=chooseOneMapZoom(centerCoord.lat,targetMpp),tileMpp=oneMapMetersPerPixel(centerCoord.lat,zoom),factor=scale*tileMpp;
+    if(!Number.isFinite(factor)||factor<=0)return false;
+    const diag=Math.ceil(Math.hypot(w,h)*1.18),gp=mercatorGlobalPixel(centerCoord.lat,centerCoord.lon,zoom),tilePx=ONEMAP_TILE_SIZE*factor;
+    const halfNative=(diag/2)/factor,tx0=Math.floor((gp.x-halfNative)/ONEMAP_TILE_SIZE)-1,tx1=Math.ceil((gp.x+halfNative)/ONEMAP_TILE_SIZE)+1;
+    const ty0=Math.floor((gp.y-halfNative)/ONEMAP_TILE_SIZE)-1,ty1=Math.ceil((gp.y+halfNative)/ONEMAP_TILE_SIZE)+1;
+    let drawn=0;
+    ctx.save();ctx.translate(w/2,h*.53);if(headingUp&&!overviewNorthUp)ctx.rotate(-headingDegreesFromYaw(yaw)*Math.PI/180);ctx.globalAlpha=.82;
+    for(let ty=ty0;ty<=ty1;ty++)for(let tx=tx0;tx<=tx1;tx++){
+      const entry=requestOneMapTile(zoom,tx,ty);if(!entry||!entry.ready)continue;entry.lastUsed=performance.now();
+      const dx=(tx*ONEMAP_TILE_SIZE-gp.x)*factor,dy=(ty*ONEMAP_TILE_SIZE-gp.y)*factor;
+      try{ctx.drawImage(entry.img,dx,dy,tilePx+.5,tilePx+.5);drawn++;}catch(_){entry.failed=true;}
+    }
+    ctx.restore();
+    if(!drawn)return false;
+    ctx.save();ctx.fillStyle='rgba(5,13,17,.24)';ctx.fillRect(0,0,w,h);ctx.restore();
+    return true;
+  }
+
+  function liveTrafficColorForSegment(seg){
+    const v=Number(seg?.liveTrafficKmh);if(!Number.isFinite(v))return null;
+    if(v<18)return '#f0675e';
+    if(v<30)return '#f3a35c';
+    if(v<45)return '#e9d56d';
+    if(v<60)return '#8bd59d';
+    return '#5ed3aa';
+  }
+
+  function nearestIncidentAhead(){
+    if(!navigation.active||navigation.mode!=='route'||!liveTrafficIncidents.length||!navigation.routeWorld.length)return null;
+    let best=null,bestAhead=Infinity;
+    for(const incident of liveTrafficIncidents){
+      const lat=Number(incident.latitude),lon=Number(incident.longitude);if(!Number.isFinite(lat)||!Number.isFinite(lon))continue;
+      const p=project(lat,lon),hit=routeProgressForPoint(p.x,p.z,true),ahead=hit.progressM-navigation.progressM;
+      if(hit.distance>95||ahead<35||ahead>2200)continue;
+      if(ahead<bestAhead){bestAhead=ahead;best={...incident,aheadM:ahead,routeDistanceM:hit.distance};}
+    }
+    return best;
+  }
+
+  function miniMapRefreshInterval(){
+    if(miniMapExpanded)return graphicsTier==='performance'?.18:.12;
+    return graphicsTier==='high'?.10:(graphicsTier==='balanced'?.135:.18);
+  }
+
   function paintMiniMap(elapsed) {
-    if(!els.miniMapCanvas||!car||elapsed-lastMiniMapPaint<.11)return;
+    if(!els.miniMapCanvas||!car||elapsed-lastMiniMapPaint<miniMapRefreshInterval())return;
     lastMiniMapPaint=elapsed;
     ensureMiniMapResolution();
     const c=els.miniMapCanvas,ctx=c.getContext('2d');if(!ctx)return;
@@ -1273,13 +1476,14 @@
     const near=(x,z,pad=1.25)=>Math.abs(x-mapCenterX)<range*pad&&Math.abs(z-mapCenterZ)<range*pad;
 
     ctx.clearRect(0,0,w,h);
-    ctx.fillStyle='#142126';ctx.fillRect(0,0,w,h);
+    const oneMapDrawn=drawOneMapMiniMapBase(ctx,w,h,mapCenterX,mapCenterZ,scale,miniMapHeadingUp,overviewNorthUp,yaw);
+    if(!oneMapDrawn){ctx.fillStyle='#142126';ctx.fillRect(0,0,w,h);}
 
     const drawPoly=(pts,fill)=>{
       if(!pts?.length)return;
       const center=pts.reduce((a,p)=>({x:a.x+p.x/pts.length,z:a.z+p.z/pts.length}),{x:0,z:0});
       if(!near(center.x,center.z,1.5))return;
-      ctx.beginPath();pts.forEach((p,i)=>{const q=toScreen(p.x,p.z);i?ctx.lineTo(q.x,q.y):ctx.moveTo(q.x,q.y);});ctx.closePath();ctx.fillStyle=fill;ctx.fill();
+      ctx.beginPath();pts.forEach((p,i)=>{const q=toScreen(p.x,p.z);i?ctx.lineTo(q.x,q.y):ctx.moveTo(q.x,q.y);});ctx.closePath();ctx.globalAlpha=oneMapDrawn?.32:1;ctx.fillStyle=fill;ctx.fill();ctx.globalAlpha=1;
     };
     for(const pts of currentParkPolygons)drawPoly(pts,'#31463b');
     for(const pts of currentWaterPolygons)drawPoly(pts,'#264856');
@@ -1296,7 +1500,7 @@
       const mx=(seg.ax+seg.bx)/2,mz=(seg.az+seg.bz)/2;if(!near(mx,mz,1.25))continue;
       const a=toScreen(seg.ax,seg.az),b=toScreen(seg.bx,seg.bz);
       ctx.beginPath();ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);
-      ctx.strokeStyle=seg.tunnel?'#586267':(seg.bridge?'#c4ccc8':(seg.major?'#a0aaa8':'#7d8988'));ctx.lineWidth=Math.max(1.2,Math.min(5.5,seg.width*scale*.82));ctx.stroke();
+      const trafficColor=liveTrafficColorForSegment(seg);ctx.strokeStyle=trafficColor||(seg.tunnel?'#586267':(seg.bridge?'#d7dedb':(seg.major?'#d0d8d5':'#aeb8b6')));ctx.globalAlpha=trafficColor?.9:(oneMapDrawn?.48:1);ctx.lineWidth=Math.max(trafficColor?2.1:1.2,Math.min(trafficColor?6.2:5.5,seg.width*scale*.82));ctx.stroke();ctx.globalAlpha=1;
     }
 
     for(const sig of trafficSignalsWorld){
@@ -1344,7 +1548,7 @@
     ctx.beginPath();ctx.moveTo(0,-10);ctx.lineTo(6,7);ctx.lineTo(0,4);ctx.lineTo(-6,7);ctx.closePath();ctx.fillStyle='#ffffff';ctx.fill();ctx.strokeStyle='#0c1518';ctx.lineWidth=2;ctx.stroke();ctx.restore();
 
     els.compassLabel.textContent=overviewNorthUp?'ROUTE · NORTH':(miniMapHeadingUp?headingCardinal(yaw):'NORTH');
-    if(!navigation.active)els.miniMapFooter.textContent=lastRoadLabel||currentLocationName;
+    if(!navigation.active)els.miniMapFooter.textContent=`${lastRoadLabel||currentLocationName}${oneMapDrawn?' · OneMap':''}`;
   }
 
   function toggleMiniMapExpanded(){
@@ -1644,6 +1848,12 @@
     return a+d*t;
   }
 
+  function ambientTrafficRenderLimit(){
+    if(graphicsTier==='performance')return 14;
+    if(graphicsTier==='balanced')return 21;
+    return MAX_AMBIENT_TRAFFIC;
+  }
+
   function updateAmbientTraffic(dt,elapsed=clock?.elapsedTime||0) {
     if(!trafficMesh||!ambientTraffic.length)return;
     const m=new THREE.Matrix4(),pos=new THREE.Vector3(),quat=new THREE.Quaternion(),scale=new THREE.Vector3();
@@ -1716,7 +1926,9 @@
       const yaw=Math.atan2(dx*a.dir,dz*a.dir);
       a.visualYaw=Number.isFinite(a.visualYaw)?lerpAngleRadians(a.visualYaw,yaw,Math.min(1,dt*6.5)):yaw;
       pos.set(a.x,a.y+spec.y,a.z);quat.setFromAxisAngle(new THREE.Vector3(0,1,0),a.visualYaw);
-      scale.set(spec.sx,spec.sy,spec.sz);m.compose(pos,quat,scale);trafficMesh.setMatrixAt(i,m);
+      if(i>=ambientTrafficRenderLimit())scale.set(.001,.001,.001);
+      else scale.set(spec.sx,spec.sy,spec.sz);
+      m.compose(pos,quat,scale);trafficMesh.setMatrixAt(i,m);
     });
     trafficMesh.instanceMatrix.needsUpdate=true;
   }
@@ -1809,7 +2021,7 @@
       if(shared.storefront)shared.storefront.emissiveIntensity=THREE.MathUtils.lerp(.10,1.28,n);
       if(shared.streetLamp)shared.streetLamp.emissiveIntensity=THREE.MathUtils.lerp(.08,4.6,n);
       if(carHeadlight)carHeadlight.intensity=n>.35?THREE.MathUtils.lerp(0,34,(n-.35)/.65):0;
-      if(renderer)renderer.toneMappingExposure=THREE.MathUtils.lerp(1.08,.91,n);
+      if(renderer)renderer.toneMappingExposure=THREE.MathUtils.lerp(1.10,.94,n)-wetness*.04;
     }
   }
 
@@ -1831,12 +2043,20 @@
   }
 
   function registerServiceWorker(){
-    // Four-file GitHub Pages deployment intentionally has no service worker.
-    // Backend caching avoids extra stale-bundle risk on iPhone Safari.
+    if(!('serviceWorker' in navigator)||location.protocol!=='https:')return;
+    navigator.serviceWorker.register(`boot.js?sw=${BUILD_ID}`,{scope:'./'}).then(reg=>{
+      reg.update?.().catch(()=>{});
+      reg.addEventListener('updatefound',()=>{
+        const worker=reg.installing;if(!worker)return;
+        worker.addEventListener('statechange',()=>{
+          if(worker.state==='installed'&&navigator.serviceWorker.controller)showToast('DriveSG update ready for next launch');
+        });
+      });
+    }).catch(err=>recordDiagnostic('service-worker',err?.message||err));
   }
 
   function createRainSystem(){
-    const count=760;
+    const count=RAIN_PARTICLES_HIGH;
     const positions=new Float32Array(count*3);
     for(let i=0;i<count;i++){
       positions[i*3]=(pseudoRandom(i*17+1)-.5)*72;
@@ -1845,7 +2065,7 @@
     }
     const geo=new THREE.BufferGeometry();geo.setAttribute('position',new THREE.BufferAttribute(positions,3));
     const mat=new THREE.PointsMaterial({color:0xbfd8e7,size:.09,transparent:true,opacity:.0,depthWrite:false,sizeAttenuation:true});
-    rainPoints=new THREE.Points(geo,mat);rainPoints.visible=false;rainPositions=positions;scene.add(rainPoints);
+    rainPoints=new THREE.Points(geo,mat);rainPoints.visible=false;rainPositions=positions;scene.add(rainPoints);applyGraphicsTier(graphicsTier,{quiet:true});
   }
 
   function weatherIconFor(condition){
@@ -1868,7 +2088,8 @@
     try{
       let data=null;
       if(BACKEND_ACTIVE){
-        const res=await fetch(`${BACKEND_BASE}/api/environment?lat=${encodeURIComponent(c.lat)}&lon=${encodeURIComponent(c.lon)}`,{headers:{Accept:'application/json'}});if(res.ok)data=await res.json();
+        try{const res=await backendFetch(`/api/environment?lat=${encodeURIComponent(c.lat)}&lon=${encodeURIComponent(c.lon)}`,{headers:{Accept:'application/json'}});if(res.ok)data=await res.json();}
+        catch(err){console.warn('DriveSG environment backend bypass',err?.message||err);}
       }
       if(!data){
         const url=`https://api.open-meteo.com/v1/forecast?latitude=${c.lat}&longitude=${c.lon}&current=temperature_2m,relative_humidity_2m,precipitation,rain,weather_code,cloud_cover,wind_speed_10m&timezone=Asia%2FSingapore&forecast_days=1`;
@@ -1902,11 +2123,34 @@
 
   function normalizeRoadName(name){return String(name||'').toUpperCase().replace(/[^A-Z0-9]/g,'');}
 
+  function updateNavigationTrafficEstimate(byName){
+    if(!navigation.active||navigation.mode!=='route'||!navigation.steps?.length){navigation.trafficMultiplier=1;navigation.trafficLabel='';return;}
+    let weighted=0,total=0,matched=0;
+    for(const step of navigation.steps){
+      const dur=Math.max(0,Number(step.duration)||0),dist=Math.max(0,Number(step.distance)||0);if(dur<=0)continue;
+      total+=dur;let factor=1;
+      const bands=byName.get(normalizeRoadName(step.name));
+      if(bands?.length){
+        const speeds=bands.map(b=>{const lo=Number(b.minSpeed),hi=Number(b.maxSpeed);return Number.isFinite(lo)&&Number.isFinite(hi)?(lo+hi)/2:(Number.isFinite(hi)?hi:null);}).filter(Number.isFinite);
+        if(speeds.length){
+          speeds.sort((a,b)=>a-b);const live=speeds[Math.floor(speeds.length/2)],baseline=THREE.MathUtils.clamp(dist/dur*3.6,28,80);
+          factor=THREE.MathUtils.clamp(baseline/Math.max(7,live),.9,2.65);matched+=dur;
+        }
+      }
+      weighted+=dur*factor;
+    }
+    if(total<=0||matched/total<.06){navigation.trafficMultiplier=1;navigation.trafficLabel='';return;}
+    const raw=weighted/total,coverage=matched/total,mult=THREE.MathUtils.lerp(1,raw,THREE.MathUtils.clamp(coverage*1.7,0,1));
+    navigation.trafficMultiplier=THREE.MathUtils.clamp(mult,.92,2.45);
+    navigation.trafficLabel=navigation.trafficMultiplier>1.55?'HEAVY TRAFFIC':(navigation.trafficMultiplier>1.20?'TRAFFIC':'LIVE');
+  }
+
   function applyLiveTrafficData(data){
     liveTrafficBands=Array.isArray(data?.speedBands)?data.speedBands:[];
     liveTrafficIncidents=Array.isArray(data?.incidents)?data.incidents.filter(i=>Number.isFinite(Number(i.latitude))&&Number.isFinite(Number(i.longitude))):[];
     const byName=new Map();
     for(const b of liveTrafficBands){const k=normalizeRoadName(b.roadName);if(!k)continue;if(!byName.has(k))byName.set(k,[]);byName.get(k).push(b);}
+    updateNavigationTrafficEstimate(byName);
     for(const seg of roadSegments){
       seg.liveTrafficKmh=null;const bands=byName.get(normalizeRoadName(seg.name));if(!bands?.length)continue;
       const mx=(seg.ax+seg.bx)/2,mz=(seg.az+seg.bz)/2,mc=unproject(mx,mz);let best=null,bestD=Infinity;
@@ -1924,13 +2168,23 @@
   async function refreshLiveTraffic(){
     if(trafficDataBusy||!BACKEND_ACTIVE||!car)return;trafficDataBusy=true;
     const c=currentCarCoords();
-    try{const res=await fetch(`${BACKEND_BASE}/api/traffic?lat=${encodeURIComponent(c.lat)}&lon=${encodeURIComponent(c.lon)}&radius=2600`,{headers:{Accept:'application/json'}});if(res.ok){const data=await res.json();if(data?.configured)applyLiveTrafficData(data);}}
+    try{const res=await backendFetch(`/api/traffic?lat=${encodeURIComponent(c.lat)}&lon=${encodeURIComponent(c.lon)}&radius=2600`,{headers:{Accept:'application/json'}});if(res.ok){const data=await res.json();if(data?.configured)applyLiveTrafficData(data);}}
     catch(err){console.warn('Live traffic refresh failed',err?.message||err);}finally{trafficDataBusy=false;}
   }
 
   function maybeRefreshLiveTraffic(elapsed){
     if(lastTrafficDataRefresh>=0&&elapsed-lastTrafficDataRefresh<TRAFFIC_REFRESH_SECONDS)return;
     lastTrafficDataRefresh=elapsed;refreshLiveTraffic();
+  }
+
+  async function refreshProviderStatus(){
+    if(!BACKEND_ACTIVE)return;
+    try{
+      const res=await backendFetch('/api/health',{headers:{Accept:'application/json'}});if(!res.ok)return;
+      const data=await res.json(),providers=data?.providers||{};
+      document.documentElement.dataset.ltaTraffic=providers.ltaTraffic?'live':'ready';
+      document.documentElement.dataset.mapProvider=oneMapTilesEnabled?'onemap':'osm';
+    }catch(_){/* provider status is non-critical */}
   }
 
   function toggleEngineSound() {
@@ -1955,7 +2209,14 @@
       const tyreSource=ctx.createBufferSource(),tyreFilter=ctx.createBiquadFilter(),tyreGain=ctx.createGain();
       tyreSource.buffer=tyreBuffer;tyreSource.loop=true;tyreFilter.type='bandpass';tyreFilter.frequency.value=760;tyreFilter.Q.value=.55;tyreGain.gain.value=.0001;
       tyreSource.connect(tyreFilter);tyreFilter.connect(tyreGain);tyreGain.connect(ctx.destination);tyreSource.start();
-      engineAudio={ctx,osc,filter,gain,tyreSource,tyreFilter,tyreGain};
+      const harmonic=ctx.createOscillator(),harmonicFilter=ctx.createBiquadFilter(),harmonicGain=ctx.createGain();
+      harmonic.type='triangle';harmonic.frequency.value=110;harmonicFilter.type='lowpass';harmonicFilter.frequency.value=900;harmonicGain.gain.value=.0001;
+      harmonic.connect(harmonicFilter);harmonicFilter.connect(harmonicGain);harmonicGain.connect(ctx.destination);harmonic.start();
+
+      const windSource=ctx.createBufferSource(),windFilter=ctx.createBiquadFilter(),windGain=ctx.createGain();
+      windSource.buffer=tyreBuffer;windSource.loop=true;windFilter.type='highpass';windFilter.frequency.value=980;windFilter.Q.value=.3;windGain.gain.value=.0001;
+      windSource.connect(windFilter);windFilter.connect(windGain);windGain.connect(ctx.destination);windSource.start();
+      engineAudio={ctx,osc,filter,gain,tyreSource,tyreFilter,tyreGain,harmonic,harmonicFilter,harmonicGain,windSource,windFilter,windGain};
     }catch(err){console.warn('Engine audio unavailable',err);engineSoundOn=false;}
   }
 
@@ -1965,6 +2226,16 @@
     engineAudio.gain.gain.cancelScheduledValues(now);engineAudio.gain.gain.linearRampToValueAtTime(target,now+.08);
     const rev=55+Math.abs(speedMps)*5.4+input.gas*18;
     engineAudio.osc.frequency.setTargetAtTime(rev,now,.06);engineAudio.filter.frequency.setTargetAtTime(430+Math.abs(speedMps)*28,now,.08);
+    if(engineAudio.harmonicGain){
+      engineAudio.harmonic.frequency.setTargetAtTime(rev*2.01,now,.055);
+      engineAudio.harmonicFilter.frequency.setTargetAtTime(720+Math.abs(speedMps)*42,now,.08);
+      engineAudio.harmonicGain.gain.setTargetAtTime(engineSoundOn?THREE.MathUtils.clamp(.004+input.gas*.006+Math.abs(speedMps)*.00012,.0001,.014):.0001,now,.06);
+    }
+    if(engineAudio.windGain){
+      const wind=engineSoundOn?THREE.MathUtils.clamp(Math.pow(Math.abs(speedMps)/34,1.65)*.022+wetness*.004,.0001,.026):.0001;
+      engineAudio.windGain.gain.setTargetAtTime(wind,now,.08);
+      engineAudio.windFilter.frequency.setTargetAtTime(900+Math.abs(speedMps)*52,now,.10);
+    }
     if(engineAudio.tyreGain){
       const scrub=engineSoundOn?THREE.MathUtils.clamp(tyreSlip*.052+(onRoad?wetness*.005:.014)*Math.min(Math.abs(speedMps)/15,1),.0001,.034):.0001;
       engineAudio.tyreGain.gain.setTargetAtTime(scrub,now,.035);
@@ -2035,6 +2306,9 @@
     const buildingVerts = [[], [], [], [], []];
     const windowVerts = [];
     const storefrontVerts = [];
+    const hdbDetailVerts = [];
+    const officeBandVerts = [];
+    const awningVerts = [];
     const buildingDescriptors = [];
     const signalPoints = [];
     const crossingPoints = [];
@@ -2098,6 +2372,8 @@
             turnLanesForward: tags['turn:lanes:forward']||'',
             turnLanesBackward: tags['turn:lanes:backward']||'',
             name: roadDisplayName(tags),
+            ref: tags.ref || '',
+            destination: tags.destination || tags['destination:ref'] || '',
             speedLimit: parseSpeedLimit(tags.maxspeed)
           };
           segments.push(seg);
@@ -2146,10 +2422,11 @@
     const filteredBuildings=filterBuildingShellsWithParts(buildingDescriptors);
     filteredBuildings.sort((a,b) => a.distance - b.distance);
     const selectedBuildings = filteredBuildings.slice(0, MAX_BUILDINGS);
-    const windowBudget={count:0};
+    const windowBudget={count:0},detailBudget={count:0};
     selectedBuildings.forEach((b,index) => {
       appendBuildingGeometry(buildingVerts[b.bucket], b);
       if(index<MAX_FACADE_BUILDINGS&&windowBudget.count<MAX_BUILDING_WINDOWS)appendBuildingFacade(windowVerts,storefrontVerts,b,windowBudget);
+      if(index<MAX_FACADE_BUILDINGS&&detailBudget.count<MAX_FACADE_DETAILS)appendBuildingIdentityDetails(hdbDetailVerts,officeBandVerts,awningVerts,b,detailBudget);
     });
     buildingVerts.forEach((verts, bucket) => {
       if (!verts.length) return;
@@ -2157,8 +2434,11 @@
       mesh.castShadow = false;
       group.add(mesh);
     });
-    if(windowVerts.length){const mesh=meshFromFlatVertices(windowVerts,shared.windows,false);mesh.renderOrder=3;group.add(mesh);}
-    if(storefrontVerts.length){const mesh=meshFromFlatVertices(storefrontVerts,shared.storefront,false);mesh.renderOrder=3;group.add(mesh);}
+    if(windowVerts.length){const mesh=meshFromFlatVertices(windowVerts,shared.windows,false);mesh.renderOrder=3;mesh.userData.qualityLayer='micro';group.add(mesh);}
+    if(storefrontVerts.length){const mesh=meshFromFlatVertices(storefrontVerts,shared.storefront,false);mesh.renderOrder=3;mesh.userData.qualityLayer='detail';group.add(mesh);}
+    if(hdbDetailVerts.length){const mesh=meshFromFlatVertices(hdbDetailVerts,shared.hdbCorridor,false);mesh.renderOrder=3;mesh.userData.qualityLayer='detail';group.add(mesh);}
+    if(officeBandVerts.length){const mesh=meshFromFlatVertices(officeBandVerts,shared.officeBand,false);mesh.renderOrder=3;mesh.userData.qualityLayer='micro';group.add(mesh);}
+    if(awningVerts.length){const mesh=meshFromFlatVertices(awningVerts,shared.awning,false);mesh.renderOrder=4;mesh.userData.qualityLayer='detail';group.add(mesh);}
 
     const signalDescriptors=mapSignalsToSegments(signalPoints,segments);
     const busStopDescriptors=mapBusStopsToSegments(busStopPoints,segments);
@@ -2166,17 +2446,20 @@
     const signalBuild = addTrafficSignals(group, signalDescriptors);
     const trafficSignalCount = signalBuild.count;
     const crossingCount = addPedestrianCrossings(group,crossingPoints,segments);
-    const busStopCount = addBusStops(group,busStopPoints);
+    const junctionMarkingCount = addJunctionRoadMarkings(group,segments,signalDescriptors);
+    const busStopCount = addBusStops(group,busStopDescriptors);
     const streetLightCount=addStreetLights(group,segments,centerX,centerZ,selectedBuildings);
     const gantryCount=addRoadGantries(group,segments,centerX,centerZ);
+    const roadSignCount=addRoadNameSigns(group,segments,centerX,centerZ);
     const treeCount = addRoadsideTrees(group, segments, centerX, centerZ, selectedBuildings);
+    const tropicalPlantCount=addTropicalVegetation(group,segments,parkPolygons,waterPolygons,centerX,centerZ,selectedBuildings);
     addLandmarksTo(group,centerX,centerZ);
     return {
       group, segments, roadGraph:roadGraphBuilt, signalDescriptors, busStopDescriptors, signalVisuals:signalBuild.visuals, roadCount,
       buildingCount: selectedBuildings.length,
       buildingColliders: selectedBuildings,
       waterPolygons, parkPolygons,
-      treeCount, streetLightCount, gantryCount, waterCount, parkCount, trafficSignalCount, crossingCount, busStopCount
+      treeCount, tropicalPlantCount, streetLightCount, gantryCount, roadSignCount, junctionMarkingCount, waterCount, parkCount, trafficSignalCount, crossingCount, busStopCount
     };
   }
 
@@ -2361,6 +2644,54 @@
     }
   }
 
+
+  function appendBuildingIdentityDetails(hdbOut,officeOut,awningOut,b,budget){
+    if(!b?.pts?.length||b.distance>430||budget.count>=MAX_FACADE_DETAILS)return;
+    const cls=b.visualClass||'generic',height=b.wallTop-b.minHeight;
+    if(height<6)return;
+    const areaSign=polygonArea(b.pts)>=0?1:-1;
+    for(let ei=0;ei<b.pts.length&&budget.count<MAX_FACADE_DETAILS;ei++){
+      const a=b.pts[ei],c=b.pts[(ei+1)%b.pts.length],dx=c.x-a.x,dz=c.z-a.z,len=Math.hypot(dx,dz);
+      if(len<7)continue;
+      const ux=dx/len,uz=dz/len,nx=(areaSign>0?dz:-dz)/len,nz=(areaSign>0?-dx:dx)/len;
+      const rect=(out,t0,t1,y0,y1,offset=.058)=>{
+        const x0=a.x+dx*t0+nx*offset,z0=a.z+dz*t0+nz*offset,x1=a.x+dx*t1+nx*offset,z1=a.z+dz*t1+nz*offset;
+        pushTri(out,[x0,y0,z0],[x1,y0,z1],[x1,y1,z1]);pushTri(out,[x0,y0,z0],[x1,y1,z1],[x0,y1,z0]);budget.count++;
+      };
+      if(cls==='hdb'){
+        // Singapore public housing reads strongly through long access-corridor / balcony bands.
+        // Keep these sparse and horizontal so they survive at driving distance without exploding geometry.
+        if(b.minHeight<.5&&b.distance<280)rect(officeOut,.035,.965,.42,2.45,.059); // void-deck shadow cue
+        const start=b.minHeight+6.2,step=b.distance<230?9.15:12.2;
+        for(let y=start;y<b.wallTop-1.4&&budget.count<MAX_FACADE_DETAILS;y+=step){
+          rect(hdbOut,.045,.955,y,y+.34,.062);
+          if(b.distance<230&&len>18)rect(hdbOut,.08,.92,y+1.05,y+1.22,.064);
+        }
+        // Vertical end/service-core strips are common enough to help HDB blocks read as HDBs.
+        if(len>22&&b.wallTop>20&&budget.count<MAX_FACADE_DETAILS){
+          rect(hdbOut,.055,.105,b.minHeight+2.2,b.wallTop-.8,.061);
+          rect(hdbOut,.895,.945,b.minHeight+2.2,b.wallTop-.8,.061);
+        }
+      }else if(cls==='office'){
+        const step=b.distance<250?6.1:9.15;
+        for(let y=b.minHeight+5.4;y<b.wallTop-1&&budget.count<MAX_FACADE_DETAILS;y+=step)rect(officeOut,.025,.975,y,y+.28,.061);
+        if(len>26&&b.distance<250&&budget.count<MAX_FACADE_DETAILS)rect(officeOut,.49,.51,b.minHeight+1,b.wallTop-.7,.064);
+      }else if(cls==='retail'&&b.minHeight<1.5&&b.distance<300){
+        const bays=Math.min(6,Math.max(1,Math.floor(len/8)));
+        for(let k=0;k<bays&&budget.count<MAX_FACADE_DETAILS;k++){
+          const t0=(k+.13)/bays,t1=(k+.87)/bays;
+          rect(awningOut,t0,t1,3.55,3.88,.067);
+        }
+      }else if(cls==='industrial'&&b.distance<260){
+        const bays=Math.min(5,Math.max(1,Math.floor(len/11)));
+        for(let k=0;k<bays&&budget.count<MAX_FACADE_DETAILS;k++){
+          const t0=(k+.16)/bays,t1=(k+.84)/bays;
+          rect(officeOut,t0,t1,4.2,4.48,.059);
+        }
+      }
+    }
+  }
+
   function addRoadGantries(group,segments,centerX,centerZ){
     const items=[];
     for(let i=0;i<segments.length&&items.length<14;i++){
@@ -2375,11 +2706,117 @@
     const signs=new THREE.InstancedMesh(signGeo,shared.gantrySign,items.length),poles=new THREE.InstancedMesh(poleGeo,shared.gantryPole,items.length*2);
     const m=new THREE.Matrix4(),pos=new THREE.Vector3(),quat=new THREE.Quaternion(),scale=new THREE.Vector3(1,1,1);let pi=0;
     items.forEach((it,i)=>{
-      const s=it.seg,dx=s.bx-s.ax,dz=s.bz-s.az,len=Math.hypot(dx,dz)||1,nx=-dz/len,nz=dx/len,x=s.ax+dx*it.t,z=s.az+dz*it.t,y=s.y||0,yaw=Math.atan2(dx,dz);
+      const s=it.seg,dx=s.bx-s.ax,dz=s.bz-s.az,len=Math.hypot(dx,dz)||1,nx=-dz/len,nz=dx/len,ux=dx/len,uz=dz/len,x=s.ax+dx*it.t,z=s.az+dz*it.t,y=s.y||0,yaw=Math.atan2(dx,dz);
       quat.setFromAxisAngle(new THREE.Vector3(0,1,0),yaw);pos.set(x,y+5.35,z);m.compose(pos,quat,scale);signs.setMatrixAt(i,m);
       for(const side of [-1,1]){pos.set(x+nx*(s.width/2+.75)*side,y+2.9,z+nz*(s.width/2+.75)*side);m.compose(pos,quat,scale);poles.setMatrixAt(pi++,m);}
+      const label=String(s.destination||s.name||s.ref||'Singapore').trim();
+      const tex=makeRoadSignTexture(label,s.ref||'');
+      if(tex){
+        const mat=new THREE.MeshBasicMaterial({map:tex,side:THREE.DoubleSide,toneMapped:false});
+        const face=new THREE.Mesh(new THREE.PlaneGeometry(8.15,1.76),mat);
+        face.position.set(x-ux*.135,y+5.35,z-uz*.135);face.rotation.y=yaw;group.add(face);
+      }
     });
     [signs,poles].forEach(mesh=>{mesh.instanceMatrix.needsUpdate=true;mesh.castShadow=false;mesh.receiveShadow=false;group.add(mesh);});return items.length;
+  }
+
+
+  function makeRoadSignTexture(label,sub=''){
+    const canvas=document.createElement('canvas');canvas.width=512;canvas.height=144;
+    const ctx=canvas.getContext('2d');if(!ctx)return null;
+    ctx.fillStyle='#17633f';ctx.fillRect(0,0,512,144);
+    ctx.strokeStyle='rgba(255,255,255,.92)';ctx.lineWidth=5;ctx.strokeRect(8,8,496,128);
+    const clean=String(label||'Singapore').replace(/\s+/g,' ').trim();
+    ctx.fillStyle='#fff';ctx.textAlign='center';ctx.textBaseline='middle';
+    let size=clean.length>25?34:clean.length>17?40:47;
+    ctx.font=`800 ${size}px -apple-system, BlinkMacSystemFont, Arial, sans-serif`;
+    ctx.fillText(clean.slice(0,34),256,sub?57:72,472);
+    if(sub){ctx.font='700 25px -apple-system, BlinkMacSystemFont, Arial, sans-serif';ctx.fillStyle='rgba(255,255,255,.9)';ctx.fillText(String(sub).slice(0,32),256,107,470);}
+    const tex=new THREE.CanvasTexture(canvas);tex.colorSpace=THREE.SRGBColorSpace;tex.minFilter=THREE.LinearFilter;tex.magFilter=THREE.LinearFilter;
+    return tex;
+  }
+
+  function addRoadNameSigns(group,segments,centerX,centerZ){
+    const used=new Set(),items=[];
+    const sorted=[...segments].sort((a,b)=>{
+      const am=(/motorway|trunk|primary/.test(a.type)?0:1),bm=(/motorway|trunk|primary/.test(b.type)?0:1);
+      if(am!==bm)return am-bm;
+      const ad=Math.hypot((a.ax+a.bx)/2-centerX,(a.az+a.bz)/2-centerZ),bd=Math.hypot((b.ax+b.bx)/2-centerX,(b.az+b.bz)/2-centerZ);
+      return ad-bd;
+    });
+    for(const seg of sorted){
+      const label=String(seg.name||'').trim();if(!label||label==='Singapore road'||used.has(label))continue;
+      const dx=seg.bx-seg.ax,dz=seg.bz-seg.az,len=Math.hypot(dx,dz);if(len<32)continue;
+      const mx=(seg.ax+seg.bx)/2,mz=(seg.az+seg.bz)/2,dist=Math.hypot(mx-centerX,mz-centerZ);if(dist>700)continue;
+      if(!/motorway|trunk|primary|secondary|tertiary/.test(seg.type||'')&&pseudoRandom(seg.ax*.11+seg.az*.17)<.62)continue;
+      used.add(label);items.push({seg,label,sub:seg.ref||seg.destination||''});if(items.length>=MAX_ROAD_NAME_SIGNS)break;
+    }
+    const poleGeo=new THREE.CylinderGeometry(.055,.07,2.5,6);
+    for(const it of items){
+      const seg=it.seg,dx=seg.bx-seg.ax,dz=seg.bz-seg.az,len=Math.hypot(dx,dz)||1,nx=-dz/len,nz=dx/len;
+      const t=.42+pseudoRandom(seg.ax*.019+seg.az*.013)*.18,x=seg.ax+dx*t,z=seg.az+dz*t,y=segmentYAt(seg,t);
+      const side=pseudoRandom(seg.ax*.07-seg.az*.04)>.5?1:-1,off=seg.width/2+2.4;
+      const sx=x+nx*off*side,sz=z+nz*off*side,yaw=Math.atan2(dx,dz)+(side<0?Math.PI:0);
+      const pole=new THREE.Mesh(poleGeo,shared.gantryPole);pole.position.set(sx,y+1.25,sz);pole.castShadow=false;group.add(pole);
+      const tex=makeRoadSignTexture(it.label,it.sub);if(!tex)continue;
+      const mat=new THREE.MeshBasicMaterial({map:tex,transparent:false,side:THREE.DoubleSide,toneMapped:false});
+      const plane=new THREE.Mesh(new THREE.PlaneGeometry(4.9,1.38),mat);
+      plane.position.set(sx,y+2.72,sz);plane.rotation.y=yaw;group.add(plane);
+    }
+    return items.length;
+  }
+
+  function polygonBounds(pts){
+    if(!pts?.length)return null;if(pts._visualBounds)return pts._visualBounds;
+    let minX=Infinity,maxX=-Infinity,minZ=Infinity,maxZ=-Infinity;
+    for(const p of pts){minX=Math.min(minX,p.x);maxX=Math.max(maxX,p.x);minZ=Math.min(minZ,p.z);maxZ=Math.max(maxZ,p.z);}
+    return pts._visualBounds={minX,maxX,minZ,maxZ};
+  }
+
+  function nearSurfaceFeature(x,z,polys,pad=10){
+    for(const pts of polys||[]){
+      const q=polygonBounds(pts);if(!q)continue;
+      if(x<q.minX-pad||x>q.maxX+pad||z<q.minZ-pad||z>q.maxZ+pad)continue;
+      if(pointInPolygonXZ(x,z,pts))return true;
+      if(x>=q.minX-pad&&x<=q.maxX+pad&&z>=q.minZ-pad&&z<=q.maxZ+pad)return true;
+    }
+    return false;
+  }
+
+  function addTropicalVegetation(group,segments,parks,waters,centerX,centerZ,buildings=[]){
+    const palms=[],shrubs=[];
+    for(let si=0;si<segments.length&&(palms.length+shrubs.length)<MAX_TROPICAL_PLANTS;si++){
+      const seg=segments[si],dx=seg.bx-seg.ax,dz=seg.bz-seg.az,len=Math.hypot(dx,dz);if(len<40)continue;
+      const ux=dx/len,uz=dz/len,nx=-uz,nz=ux,seed=Math.abs(Math.round(seg.ax*11+seg.az*7+si*19));
+      const spacing=/primary|secondary|tertiary/.test(seg.type||'')?72:105;
+      for(let d=spacing*.5;d<len&&(palms.length+shrubs.length)<MAX_TROPICAL_PLANTS;d+=spacing){
+        const side=pseudoRandom(seed+d*3)>.5?1:-1,off=seg.width/2+5.8+pseudoRandom(seed+d*7)*3.4;
+        const x=seg.ax+ux*d+nx*off*side,z=seg.az+uz*d+nz*off*side;
+        if(Math.hypot(x-centerX,z-centerZ)>760||pointHitsBuildingBounds(x,z,buildings,2.8))continue;
+        const waterfront=nearSurfaceFeature(x,z,waters,16),park=nearSurfaceFeature(x,z,parks,12);
+        const boulevard=/primary|secondary/.test(seg.type||'')&&pseudoRandom(seed+d*13)>.62;
+        if(waterfront||park||boulevard){
+          const scale=.78+pseudoRandom(seed+d*17)*.42;
+          if(waterfront||pseudoRandom(seed+d*23)>.55)palms.push({x,z,scale});
+          else shrubs.push({x,z,scale:.8+scale*.25});
+        }
+      }
+    }
+    if(palms.length){
+      const trunkGeo=new THREE.CylinderGeometry(.14,.24,5.2,7),crownGeo=new THREE.ConeGeometry(2.6,1.25,7);
+      const trunks=new THREE.InstancedMesh(trunkGeo,shared.treeTrunk,palms.length),crowns=new THREE.InstancedMesh(crownGeo,shared.palmLeaf,palms.length);
+      const m=new THREE.Matrix4(),pos=new THREE.Vector3(),quat=new THREE.Quaternion(),scale=new THREE.Vector3();
+      palms.forEach((t,i)=>{scale.set(t.scale,t.scale,t.scale);pos.set(t.x,2.6*t.scale,t.z);m.compose(pos,quat,scale);trunks.setMatrixAt(i,m);
+        quat.setFromAxisAngle(new THREE.Vector3(0,1,0),pseudoRandom(i*43)*Math.PI*2);scale.set(t.scale*(.92+pseudoRandom(i+9)*.2),t.scale,t.scale*(.92+pseudoRandom(i+19)*.2));pos.set(t.x,5.55*t.scale,t.z);m.compose(pos,quat,scale);crowns.setMatrixAt(i,m);});
+      trunks.instanceMatrix.needsUpdate=true;crowns.instanceMatrix.needsUpdate=true;group.add(trunks,crowns);
+    }
+    if(shrubs.length){
+      const geo=new THREE.IcosahedronGeometry(1.15,1),mesh=new THREE.InstancedMesh(geo,shared.treeLeafLight,shrubs.length);
+      const m=new THREE.Matrix4(),pos=new THREE.Vector3(),quat=new THREE.Quaternion(),scale=new THREE.Vector3();
+      shrubs.forEach((t,i)=>{const s=t.scale*(.7+pseudoRandom(i+31)*.4);pos.set(t.x,.85*s,t.z);scale.set(s*1.25,s*.82,s);m.compose(pos,quat,scale);mesh.setMatrixAt(i,m);});
+      mesh.instanceMatrix.needsUpdate=true;group.add(mesh);
+    }
+    return palms.length+shrubs.length;
   }
 
   function addStreetLights(group,segments,centerX,centerZ,buildings=[]){
@@ -2486,12 +2923,30 @@
   }
 
   function appendWayLaneMarkings(out, segments, width, lanes, oneway) {
-    if(!segments.length||lanes<2)return;
-    const offsets=[];
-    for(let i=1;i<lanes;i++) offsets.push(-width/2+(width*i/lanes));
-    // A mapped one-way carriageway has only same-direction lane dividers. A normal
-    // two-way road also uses the center divider from the same calculated offsets.
-    for(const seg of segments) for(const offset of offsets) appendOffsetDashes(out,seg,offset);
+    if(!segments.length)return;
+    if(lanes>=2){
+      const offsets=[];
+      for(let i=1;i<lanes;i++) offsets.push(-width/2+(width*i/lanes));
+      // A mapped one-way carriageway has only same-direction lane dividers. A normal
+      // two-way road also uses the center divider from the same calculated offsets.
+      for(const seg of segments) for(const offset of offsets) appendOffsetDashes(out,seg,offset);
+    }
+    for(const seg of segments){
+      if(/motorway|trunk|primary/.test(seg.type||'')){
+        const edge=Math.max(.7,width/2-.24);
+        appendOffsetSolidLine(out,seg,edge,.075);
+        appendOffsetSolidLine(out,seg,-edge,.075);
+      }
+    }
+  }
+
+  function appendOffsetSolidLine(out,seg,offset,half=.07){
+    const dx=seg.bx-seg.ax,dz=seg.bz-seg.az,len=Math.hypot(dx,dz)||1;if(len<3)return;
+    const ux=dx/len,uz=dz/len,nx=-uz,nz=ux;
+    const ax=seg.ax+nx*offset,az=seg.az+nz*offset,bx=seg.bx+nx*offset,bz=seg.bz+nz*offset;
+    const px=nx*half,pz=nz*half,yA=segmentYAt(seg,0)+.073,yB=segmentYAt(seg,1)+.073;
+    pushTri(out,[ax+px,yA,az+pz],[ax-px,yA,az-pz],[bx-px,yB,bz-pz]);
+    pushTri(out,[ax+px,yA,az+pz],[bx-px,yB,bz-pz],[bx+px,yB,bz+pz]);
   }
 
   function appendOffsetDashes(out, seg, offset) {
@@ -2629,16 +3084,113 @@
     return count;
   }
 
+
+  function appendRoadMarkingRect(out,cx,cz,ux,uz,nx,nz,alongHalf,acrossHalf,y){
+    const a=[cx-ux*alongHalf-nx*acrossHalf,y,cz-uz*alongHalf-nz*acrossHalf];
+    const b=[cx-ux*alongHalf+nx*acrossHalf,y,cz-uz*alongHalf+nz*acrossHalf];
+    const c=[cx+ux*alongHalf+nx*acrossHalf,y,cz+uz*alongHalf+nz*acrossHalf];
+    const d=[cx+ux*alongHalf-nx*acrossHalf,y,cz+uz*alongHalf-nz*acrossHalf];
+    pushTri(out,a,b,c);pushTri(out,a,c,d);
+  }
+
+  function appendDirectionArrow(out,seg,t,laneOffset=0,kind='straight'){
+    const dx=seg.bx-seg.ax,dz=seg.bz-seg.az,len=Math.hypot(dx,dz)||1,ux=dx/len,uz=dz/len,nx=-uz,nz=ux;
+    const cx=seg.ax+dx*t+nx*laneOffset,cz=seg.az+dz*t+nz*laneOffset,y=segmentYAt(seg,t)+.086;
+    appendRoadMarkingRect(out,cx-ux*.7,cz-uz*.7,ux,uz,nx,nz,1.45,.11,y);
+    const tip=[cx+ux*1.55,y,cz+uz*1.55],left=[cx+ux*.55+nx*.58,y,cz+uz*.55+nz*.58],right=[cx+ux*.55-nx*.58,y,cz+uz*.55-nz*.58];
+    pushTri(out,tip,left,right);
+    if(kind==='left'||kind==='right'){
+      const side=kind==='left'?1:-1;
+      const bx=cx+ux*.2+nx*side*.25,bz=cz+uz*.2+nz*side*.25;
+      const p1=[bx,y,bz],p2=[bx+nx*side*.92,y,bz+nz*side*.92],p3=[bx+ux*.55+nx*side*.65,y,bz+uz*.55+nz*side*.65];
+      pushTri(out,p1,p2,p3);
+    }
+  }
+
+  function addJunctionRoadMarkings(group,segments,signals=[]){
+    const white=[],yellow=[];let count=0;
+    const signalClusters=new Map();
+    for(const sig of signals){
+      const key=String(sig.clusterId??sig.id);
+      if(!signalClusters.has(key))signalClusters.set(key,[]);
+      signalClusters.get(key).push(sig);
+      const seg=sig.seg;if(!seg)continue;
+      const dx=seg.bx-seg.ax,dz=seg.bz-seg.az,len=Math.hypot(dx,dz)||1,ux=dx/len,uz=dz/len,nx=-uz,nz=ux;
+      const t=THREE.MathUtils.clamp(sig.t-.018,0.03,.97),cx=seg.ax+dx*t,cz=seg.az+dz*t,y=segmentYAt(seg,t)+.085;
+      appendRoadMarkingRect(white,cx,cz,ux,uz,nx,nz,.19,Math.max(1.9,seg.width*.46),y);
+      if(seg.lanes>=2&&len>25){
+        const offset=trafficLaneOffset(seg,1,0);
+        const raw=String(seg.turnLanesForward||seg.turnLanes||'').toLowerCase();
+        const kind=raw.includes('left')&&!raw.includes('right')?'left':raw.includes('right')&&!raw.includes('left')?'right':'straight';
+        appendDirectionArrow(white,seg,THREE.MathUtils.clamp(sig.t-.075,.08,.9),offset,kind);
+      }
+      count++;
+    }
+    // Singapore's yellow box-junction language is visually distinctive. Approximate it only
+    // at true multi-approach signal clusters to avoid painting every minor crossing.
+    for(const list of signalClusters.values()){
+      if(list.length<2)continue;
+      let cx=0,cz=0;for(const s of list){cx+=s.x;cz+=s.z;}cx/=list.length;cz/=list.length;
+      const first=list[0].seg;if(!first)continue;
+      const dx=first.bx-first.ax,dz=first.bz-first.az,len=Math.hypot(dx,dz)||1,ux=dx/len,uz=dz/len,nx=-uz,nz=ux;
+      const size=THREE.MathUtils.clamp(Math.max(...list.map(s=>s.seg?.width||6))*1.05,6.5,13),y=(first.y||0)+.087;
+      for(const sign of [-1,1]){
+        for(let off=-size*.34;off<=size*.34;off+=size*.34){
+          const sx=cx+nx*off,sz=cz+nz*off;
+          const aCx=sx+ux*off*sign*.12,aCz=sz+uz*off*sign*.12;
+          const dUx=(ux+nx*sign),dUz=(uz+nz*sign),dl=Math.hypot(dUx,dUz)||1;
+          appendRoadMarkingRect(yellow,aCx,aCz,dUx/dl,dUz/dl,-dUz/dl,dUx/dl,size*.58,.055,y);
+        }
+      }
+    }
+    if(white.length){const m=meshFromFlatVertices(white,shared.line,false);m.renderOrder=6;group.add(m);}
+    if(yellow.length){const m=meshFromFlatVertices(yellow,shared.markingYellow,false);m.renderOrder=6;group.add(m);}
+    return count;
+  }
+
   function addBusStops(group,points) {
     const count=Math.min(points.length,MAX_BUS_STOPS);if(!count)return 0;
     const poleGeo=new THREE.CylinderGeometry(.055,.07,2.35,6),signGeo=new THREE.BoxGeometry(.55,.42,.10);
     const poles=new THREE.InstancedMesh(poleGeo,shared.busStopPole,count),signs=new THREE.InstancedMesh(signGeo,shared.busStopSign,count);
+    const shelterItems=[],yellow=[];
     const m=new THREE.Matrix4(),pos=new THREE.Vector3(),quat=new THREE.Quaternion(),scale=new THREE.Vector3(1,1,1);
     for(let i=0;i<count;i++){
-      const p=points[i];pos.set(p.x,1.175,p.z);m.compose(pos,quat,scale);poles.setMatrixAt(i,m);
-      pos.set(p.x,2.15,p.z);m.compose(pos,quat,scale);signs.setMatrixAt(i,m);
+      const p=points[i],seg=p.seg;
+      let sx=p.x,sz=p.z,y=p.y||0,yaw=0,side=1,nx=1,nz=0;
+      if(seg){
+        const dx=seg.bx-seg.ax,dz=seg.bz-seg.az,len=Math.hypot(dx,dz)||1;nx=-dz/len;nz=dx/len;
+        const rawSide=(p.x-(seg.ax+dx*(p.t||0)))*nx+(p.z-(seg.az+dz*(p.t||0)))*nz;side=rawSide>=0?1:-1;
+        const off=seg.width/2+2.1;sx=seg.ax+dx*(p.t||0)+nx*off*side;sz=seg.az+dz*(p.t||0)+nz*off*side;y=segmentYAt(seg,p.t||0);
+        yaw=Math.atan2(dx,dz);
+        const ux=dx/len,uz=dz/len,laneEdge=(seg.width/2-.32)*side;
+        for(let k=-3;k<=3;k++){
+          const along=k*2.45,t0=THREE.MathUtils.clamp((p.t||0)+(along-1.15)/len,0,1),t1=THREE.MathUtils.clamp((p.t||0)+(along+1.15)/len,0,1);
+          const baseX=seg.ax+dx*(p.t||0)+nx*laneEdge,baseZ=seg.az+dz*(p.t||0)+nz*laneEdge;
+          const ax=baseX+ux*(along-1.15),az=baseZ+uz*(along-1.15),bx=baseX+ux*(along+1.15)+nx*.55*side,bz=baseZ+uz*(along+1.15)+nz*.55*side;
+          const ldx=bx-ax,ldz=bz-az,ll=Math.hypot(ldx,ldz)||1,lux=ldx/ll,luz=ldz/ll,lnx=-luz,lnz=lux,hh=.055,yy=segmentYAt(seg,(t0+t1)/2)+.088;
+          pushTri(yellow,[ax+lnx*hh,yy,az+lnz*hh],[ax-lnx*hh,yy,az-lnz*hh],[bx-lnx*hh,yy,bz-lnz*hh]);
+          pushTri(yellow,[ax+lnx*hh,yy,az+lnz*hh],[bx-lnx*hh,yy,bz-lnz*hh],[bx+lnx*hh,yy,bz+lnz*hh]);
+        }
+        if(shelterItems.length<38&&pseudoRandom((p.id||i)*.019)>.28){
+          shelterItems.push({x:sx+nx*side*1.2,z:sz+nz*side*1.2,y,yaw});
+        }
+      }
+      quat.setFromAxisAngle(new THREE.Vector3(0,1,0),yaw);
+      pos.set(sx,y+1.175,sz);m.compose(pos,quat,scale);poles.setMatrixAt(i,m);
+      pos.set(sx,y+2.15,sz);m.compose(pos,quat,scale);signs.setMatrixAt(i,m);
     }
     [poles,signs].forEach(mesh=>{mesh.instanceMatrix.needsUpdate=true;mesh.castShadow=false;mesh.receiveShadow=false;group.add(mesh);});
+    if(shelterItems.length){
+      const roofGeo=new THREE.BoxGeometry(4.8,.18,1.7),glassGeo=new THREE.BoxGeometry(4.5,1.8,.07),benchGeo=new THREE.BoxGeometry(2.8,.16,.48);
+      const roofs=new THREE.InstancedMesh(roofGeo,shared.busShelterRoof,shelterItems.length),backs=new THREE.InstancedMesh(glassGeo,shared.busShelterGlass,shelterItems.length),benches=new THREE.InstancedMesh(benchGeo,shared.busShelterRoof,shelterItems.length);
+      shelterItems.forEach((it,i)=>{quat.setFromAxisAngle(new THREE.Vector3(0,1,0),it.yaw);
+        pos.set(it.x,it.y+2.55,it.z);m.compose(pos,quat,scale);roofs.setMatrixAt(i,m);
+        pos.set(it.x,it.y+1.55,it.z);m.compose(pos,quat,scale);backs.setMatrixAt(i,m);
+        pos.set(it.x,it.y+.72,it.z+.2);m.compose(pos,quat,scale);benches.setMatrixAt(i,m);
+      });
+      [roofs,backs,benches].forEach(mesh=>{mesh.instanceMatrix.needsUpdate=true;mesh.castShadow=false;group.add(mesh);});
+    }
+    if(yellow.length){const mesh=meshFromFlatVertices(yellow,shared.markingYellow,false);mesh.renderOrder=6;group.add(mesh);}
     return count;
   }
 
@@ -2774,7 +3326,8 @@
       id:Number(el.id)||1,pts,x,z,w,d,h,wallTop,roofHeight,roofShape,minHeight,distance,area,isPart,kind,
       name:tags.name||'',
       bounds:{minX,maxX,minZ,maxZ},
-      bucket:buildingMaterialBucket(tags,el.id)
+      bucket:buildingMaterialBucket(tags,el.id),
+      visualClass:buildingVisualClass(tags,el.id)
     };
   }
 
@@ -2799,6 +3352,20 @@
     if(/industrial|warehouse|garage/.test(t))return 2;
     if(/school|hospital|civic|public|government|university/.test(t))return 3;
     return Math.abs(Number(id)||0)%4;
+  }
+
+  function buildingVisualClass(tags={},id=1) {
+    const t=String(tags['building:part']||tags.building||'').toLowerCase();
+    const name=String(tags.name||'').toLowerCase();
+    const use=String(tags['building:use']||tags.office||tags.shop||'').toLowerCase();
+    const material=String(tags['building:material']||tags.material||'').toLowerCase();
+    if(/hdb|housing & development|block\s*\d+/.test(name)||/apartments|residential|dormitory/.test(t))return 'hdb';
+    if(/retail|commercial|mall|supermarket|department_store/.test(t)||/retail|shop|mall/.test(use))return 'retail';
+    if(/office|hotel/.test(t)||/office|hotel/.test(use)||/glass/.test(material))return 'office';
+    if(/industrial|warehouse|garage/.test(t))return 'industrial';
+    if(/school|hospital|civic|public|government|university|college/.test(t))return 'civic';
+    if(/house|detached|terrace|semidetached_house/.test(t))return 'lowrise';
+    return pseudoRandom((Number(id)||1)*41)>.72?'office':'generic';
   }
 
   function parseMeasureMeters(value) {
@@ -2853,6 +3420,14 @@
       else if (lm.kind==='ngeeann') addNgeeAnn(group,p.x,p.z);
       else if (lm.kind==='orchardgateway') addOrchardGateway(group,p.x,p.z);
       else if (lm.kind==='jewel') addJewel(group,p.x,p.z);
+      else if (lm.kind==='pinnacle') addPinnacle(group,p.x,p.z);
+      else if (lm.kind==='sportshub') addSportsHub(group,p.x,p.z);
+      else if (lm.kind==='hdbhub') addHdbHub(group,p.x,p.z);
+      else if (lm.kind==='gallery') addNationalGallery(group,p.x,p.z);
+      else if (lm.kind==='raffleshotel') addRafflesHotel(group,p.x,p.z);
+      else if (lm.kind==='vivocity') addVivoCity(group,p.x,p.z);
+      else if (lm.kind==='helix') addHelixBridge(group,p.x,p.z);
+      else if (lm.kind==='ocbc') addOcbcCentre(group,p.x,p.z);
     }
   }
 
@@ -2923,6 +3498,66 @@
     const oculus=new THREE.Mesh(new THREE.TorusGeometry(5.2,.8,8,24),new THREE.MeshStandardMaterial({color:0x53686d,roughness:.5}));oculus.rotation.x=Math.PI/2;oculus.position.set(x,17.3,z);group.add(oculus);
   }
 
+
+  function addPinnacle(group,x,z){
+    const mat=new THREE.MeshStandardMaterial({color:0xc9c7c0,roughness:.78}),sky=new THREE.MeshStandardMaterial({color:0x7b8789,roughness:.55});
+    const xs=[-32,-16,0,16,32];
+    xs.forEach((dx,i)=>{const h=92+(i%2)*7,t=new THREE.Mesh(new THREE.BoxGeometry(12,h,18),mat);t.position.set(x+dx,h/2,z+(i%2?2:-2));group.add(t);});
+    const deck1=new THREE.Mesh(new THREE.BoxGeometry(78,2.4,9),sky);deck1.position.set(x,51,z);group.add(deck1);
+    const deck2=new THREE.Mesh(new THREE.BoxGeometry(78,2.4,9),sky);deck2.position.set(x,83,z);group.add(deck2);
+  }
+
+  function addSportsHub(group,x,z){
+    const roof=new THREE.MeshStandardMaterial({color:0xd4d7d4,roughness:.56,metalness:.04}),dark=new THREE.MeshStandardMaterial({color:0x596266,roughness:.7});
+    const bowl=new THREE.Mesh(new THREE.CylinderGeometry(46,50,18,28),dark);bowl.position.set(x,9,z);group.add(bowl);
+    const dome=new THREE.Mesh(new THREE.SphereGeometry(50,30,12,0,Math.PI*2,0,Math.PI/2),roof);dome.scale.y=.36;dome.position.set(x,17,z);group.add(dome);
+  }
+
+  function addHdbHub(group,x,z){
+    const hdb=new THREE.MeshStandardMaterial({color:0xc9c5b8,roughness:.82}),glass=new THREE.MeshStandardMaterial({color:0x66808c,roughness:.3,metalness:.1});
+    const podium=new THREE.Mesh(new THREE.BoxGeometry(52,14,34),hdb);podium.position.set(x,7,z);group.add(podium);
+    const tower=new THREE.Mesh(new THREE.BoxGeometry(22,76,24),hdb);tower.position.set(x-9,52,z);group.add(tower);
+    for(let y=20;y<86;y+=9){const band=new THREE.Mesh(new THREE.BoxGeometry(22.3,.45,24.3),glass);band.position.set(x-9,y,z);group.add(band);}
+  }
+
+  function addNationalGallery(group,x,z){
+    const stone=new THREE.MeshStandardMaterial({color:0xd8d0be,roughness:.85}),roof=new THREE.MeshStandardMaterial({color:0x7f827e,roughness:.82});
+    const left=new THREE.Mesh(new THREE.BoxGeometry(31,22,26),stone);left.position.set(x-17,11,z);group.add(left);
+    const right=new THREE.Mesh(new THREE.BoxGeometry(31,22,26),stone);right.position.set(x+17,11,z+1);group.add(right);
+    const bridge=new THREE.Mesh(new THREE.BoxGeometry(13,5,12),new THREE.MeshStandardMaterial({color:0x87979c,roughness:.42,metalness:.08}));bridge.position.set(x,15,z);group.add(bridge);
+    [-17,17].forEach(dx=>{const cap=new THREE.Mesh(new THREE.ConeGeometry(11,6,4),roof);cap.rotation.y=Math.PI/4;cap.scale.z=.72;cap.position.set(x+dx,25,z);group.add(cap);});
+  }
+
+  function addRafflesHotel(group,x,z){
+    const white=new THREE.MeshStandardMaterial({color:0xe8e2d6,roughness:.84}),roof=new THREE.MeshStandardMaterial({color:0x6e7970,roughness:.9});
+    const body=new THREE.Mesh(new THREE.BoxGeometry(52,16,29),white);body.position.set(x,8,z);group.add(body);
+    const wing1=new THREE.Mesh(new THREE.BoxGeometry(23,13,48),white);wing1.position.set(x-25,6.5,z+7);group.add(wing1);
+    const wing2=wing1.clone();wing2.position.x=x+25;group.add(wing2);
+    const cap=new THREE.Mesh(new THREE.BoxGeometry(54,2.2,31),roof);cap.position.set(x,17.1,z);group.add(cap);
+  }
+
+  function addVivoCity(group,x,z){
+    const white=new THREE.MeshStandardMaterial({color:0xd3d6d3,roughness:.66}),glass=new THREE.MeshStandardMaterial({color:0x6e8791,roughness:.28,metalness:.08});
+    const base=new THREE.Mesh(new THREE.BoxGeometry(82,18,46),white);base.position.set(x,9,z);group.add(base);
+    const curve=new THREE.Mesh(new THREE.CylinderGeometry(25,25,16,20,1,false,0,Math.PI),glass);curve.rotation.z=Math.PI/2;curve.rotation.y=Math.PI/2;curve.position.set(x+26,14,z);group.add(curve);
+    const roof=new THREE.Mesh(new THREE.BoxGeometry(72,3,38),white);roof.position.set(x-4,20,z);group.add(roof);
+  }
+
+  function addHelixBridge(group,x,z){
+    const metal=new THREE.MeshStandardMaterial({color:0xaeb8ba,roughness:.46,metalness:.24}),deckMat=new THREE.MeshStandardMaterial({color:0x737c7e,roughness:.74});
+    const deck=new THREE.Mesh(new THREE.BoxGeometry(7,1.1,74),deckMat);deck.position.set(x,3.2,z);deck.rotation.y=-.18;group.add(deck);
+    for(let i=0;i<15;i++){
+      const t=i/14,a=t*Math.PI*5.2,zz=-34+t*68;
+      const ring=new THREE.Mesh(new THREE.TorusGeometry(4.2,.18,5,18),metal);ring.position.set(x+Math.sin(a)*.45,7.2,z+zz);ring.rotation.x=Math.PI/2;ring.rotation.z=a*.08;group.add(ring);
+    }
+  }
+
+  function addOcbcCentre(group,x,z){
+    const concrete=new THREE.MeshStandardMaterial({color:0xbcb9af,roughness:.78}),dark=new THREE.MeshStandardMaterial({color:0x4f5d61,roughness:.42,metalness:.06});
+    const core=new THREE.Mesh(new THREE.BoxGeometry(23,132,31),concrete);core.position.set(x,66,z);group.add(core);
+    for(let y=12;y<126;y+=13){const slit=new THREE.Mesh(new THREE.BoxGeometry(23.4,2.4,31.4),dark);slit.position.set(x,y,z);group.add(slit);}
+  }
+
   function buildFallbackWorld() {
     const group=new THREE.Group();
     const segments=[];
@@ -2971,6 +3606,7 @@
     const previous=dynamicWorld;
     dynamicWorld=built.group;
     scene.add(dynamicWorld);
+    applyGraphicsTier(graphicsTier,{quiet:true});
     roadSegments=built.segments;
     roadGraph=built.roadGraph||buildRoadGraph(roadSegments);
     trafficSignalsWorld=built.signalDescriptors||[];
@@ -2986,15 +3622,15 @@
     createAmbientTraffic(dynamicWorld,roadSegments,roadGraph);
     if(navigation.active&&navigation.mode==='route')renderNavigationWorld();
     if(previous){scene.remove(previous);disposeWorldGroup(previous);}
-    console.info(`DriveSG world: ${built.roadCount} road ways, ${built.buildingCount} buildings, ${built.trafficSignalCount||0} traffic signals, ${built.streetLightCount||0} street lights, ${built.treeCount||0} trees, ${built.segments.length} road segments`);
+    console.info(`DriveSG world: ${built.roadCount} road ways, ${built.buildingCount} buildings, ${built.trafficSignalCount||0} signals, ${built.streetLightCount||0} lights, ${built.roadSignCount||0} road signs, ${(built.treeCount||0)+(built.tropicalPlantCount||0)} plants, ${built.segments.length} segments`);
   }
 
   function disposeWorldGroup(group) {
-    const retained = new Set([shared.sidewalk,shared.roadEdge,shared.road,shared.majorRoad,shared.line,shared.median,shared.bridge,shared.tunnel,shared.water,shared.park,shared.windows,shared.storefront,shared.treeTrunk,shared.treeLeaf,shared.signalPole,shared.signalHead,shared.signalRed,shared.signalAmber,shared.signalGreen,shared.busStopPole,shared.busStopSign,shared.streetPole,shared.streetLamp,shared.gantryPole,shared.gantrySign,trafficMaterial,...shared.buildings]);
+    const retained = new Set([shared.sidewalk,shared.roadEdge,shared.road,shared.majorRoad,shared.line,shared.markingYellow,shared.median,shared.bridge,shared.tunnel,shared.water,shared.park,shared.windows,shared.storefront,shared.hdbCorridor,shared.officeBand,shared.awning,shared.islandKerb,shared.treeTrunk,shared.treeLeaf,shared.treeLeafLight,shared.palmLeaf,shared.signalPole,shared.signalHead,shared.signalRed,shared.signalAmber,shared.signalGreen,shared.busStopPole,shared.busStopSign,shared.busShelterRoof,shared.busShelterGlass,shared.streetPole,shared.streetLamp,shared.gantryPole,shared.gantrySign,trafficMaterial,...shared.buildings]);
     group.traverse(obj=>{
       if(obj.geometry) obj.geometry.dispose?.();
       const mats = Array.isArray(obj.material) ? obj.material : (obj.material ? [obj.material] : []);
-      mats.forEach(mat=>{ if(!retained.has(mat)) mat.dispose?.(); });
+      mats.forEach(mat=>{ if(!retained.has(mat)){ mat.map?.dispose?.(); mat.dispose?.(); } });
     });
   }
 
@@ -3352,6 +3988,7 @@
       const near=nearestRoadDistanceIn(car.position.x,car.position.z,built.segments);
       if(!Number.isFinite(near)||near>40)throw new Error('Streamed map does not cover the car');
       swapDynamicWorld(built);
+      warmSceneShaders();
       loadedCenterWorld={x:centerX,z:centerZ};
       setMapState('live');
     }catch(err){
@@ -3370,6 +4007,51 @@
     fetchOsmData(c.lat,c.lon).catch(()=>{}).finally(()=>{routePrefetchBusy=false;});
   }
 
+  function initialiseGraphicsTier(){
+    const px=Math.max(screen?.width||0,screen?.height||0)*Math.min(window.devicePixelRatio||1,2);
+    const lowEnd=px>1900 || (navigator.deviceMemory&&navigator.deviceMemory<=4);
+    graphicsTier=lowEnd?'balanced':'high';
+    applyGraphicsTier(graphicsTier,{quiet:true});
+  }
+
+  function graphicsTierRank(tier){return tier==='performance'?0:(tier==='balanced'?1:2);}
+
+  function applyGraphicsTier(tier,{quiet=false}={}){
+    if(!['high','balanced','performance'].includes(tier))return;
+    const changed=tier!==graphicsTier;
+    graphicsTier=tier;
+    document.documentElement.dataset.graphicsTier=tier;
+    if(renderer){
+      const shadowOn=tier!=='performance';
+      renderer.shadowMap.enabled=shadowOn;
+      if(sun)sun.castShadow=shadowOn;
+    }
+    if(rainPoints?.geometry){
+      const count=tier==='high'?RAIN_PARTICLES_HIGH:(tier==='balanced'?RAIN_PARTICLES_BALANCED:RAIN_PARTICLES_PERFORMANCE);
+      rainPoints.geometry.setDrawRange(0,count);
+    }
+    if(dynamicWorld){
+      dynamicWorld.traverse(obj=>{
+        const layer=obj.userData?.qualityLayer;
+        if(layer==='micro')obj.visible=tier!=='performance';
+        else if(layer==='detail')obj.visible=true;
+      });
+    }
+    if(changed&&!quiet)showToast(`Graphics · ${tier==='performance'?'performance':tier}`);
+  }
+
+  function updatePresentationFx(dt){
+    if(!els.speedVignette||!car)return;
+    const speedRatio=THREE.MathUtils.clamp(Math.abs(speedMps)/35,0,1);
+    const vignette=THREE.MathUtils.clamp((speedRatio-.28)*.24+cameraShake*.16,0,.20);
+    els.speedVignette.style.opacity=String(vignette);
+    els.speedVignette.style.transform=`scale(${(1.05+speedRatio*.018).toFixed(3)})`;
+    if(els.rainGlass){
+      const rain=environmentState.condition==='heavy-rain'?1:(environmentState.condition==='rain'?.58:0);
+      els.rainGlass.style.opacity=String(THREE.MathUtils.clamp(rain*.22+wetness*.09,0,.28));
+    }
+  }
+
   function animate() {
     requestAnimationFrame(animate);
     const dt=Math.min(clock.getDelta(),.045);
@@ -3384,6 +4066,7 @@
     updateChallenge(dt,elapsed);
     updateNavigation(elapsed);
     updateCamera(dt,elapsed);
+    updatePresentationFx(dt);
     maybeStreamWorld(elapsed);
     maybePrefetchRouteAhead(elapsed);
     paintMiniMap(elapsed);
@@ -3398,11 +4081,36 @@
     const span=now-fpsWindowStart;
     if(span<2600)return;
     const fps=frameCounter*1000/span;
-    const minRatio=.82,maxRatio=basePixelRatio;
+    fpsSmoothed=fpsSmoothed*.68+fps*.32;
+    const minRatio=graphicsTier==='performance'?.72:.80;
+    const maxRatio=basePixelRatio;
     let next=qualityPixelRatio;
-    if(fps<42&&qualityPixelRatio>minRatio)next=Math.max(minRatio,qualityPixelRatio-.12);
-    else if(fps>57&&qualityPixelRatio<maxRatio)next=Math.min(maxRatio,qualityPixelRatio+.08);
-    if(Math.abs(next-qualityPixelRatio)>.02){qualityPixelRatio=next;renderer.setPixelRatio(qualityPixelRatio);renderer.setSize(viewportWidth(),viewportHeight(),false);}
+
+    if(fpsSmoothed<PERFORMANCE_TARGET_FPS-7&&qualityPixelRatio>minRatio)next=Math.max(minRatio,qualityPixelRatio-.10);
+    else if(fpsSmoothed>PERFORMANCE_TARGET_FPS+7&&qualityPixelRatio<maxRatio&&graphicsTier!=='performance')next=Math.min(maxRatio,qualityPixelRatio+.06);
+
+    if(Math.abs(next-qualityPixelRatio)>.02){
+      qualityPixelRatio=next;
+      renderer.setPixelRatio(qualityPixelRatio);
+      renderer.setSize(viewportWidth(),viewportHeight(),false);
+    }
+
+    if(fpsSmoothed<PERFORMANCE_TARGET_FPS-11){qualityLowWindows++;qualityHighWindows=0;}
+    else if(fpsSmoothed>PERFORMANCE_TARGET_FPS+5){qualityHighWindows++;qualityLowWindows=Math.max(0,qualityLowWindows-1);}
+    else {qualityLowWindows=Math.max(0,qualityLowWindows-1);qualityHighWindows=Math.max(0,qualityHighWindows-1);}
+
+    const elapsed=clock?.elapsedTime||0;
+    if(elapsed-lastGraphicsTierChange>GRAPHICS_TIER_COOLDOWN){
+      if(qualityLowWindows>=2&&graphicsTier!=='performance'){
+        const nextTier=graphicsTier==='high'?'balanced':'performance';
+        applyGraphicsTier(nextTier);
+        lastGraphicsTierChange=elapsed;qualityLowWindows=0;qualityHighWindows=0;
+      }else if(qualityHighWindows>=4&&graphicsTier!=='high'){
+        const nextTier=graphicsTier==='performance'?'balanced':'high';
+        applyGraphicsTier(nextTier,{quiet:true});
+        lastGraphicsTierChange=elapsed;qualityLowWindows=0;qualityHighWindows=0;
+      }
+    }
     frameCounter=0;fpsWindowStart=now;
   }
 
@@ -3426,6 +4134,44 @@
     });
   }
 
+  async function shareDriveSG(){
+    const url=`${location.origin}${location.pathname}`;
+    const data={title:'DriveSG',text:'Drive Singapore in your browser.',url};
+    try{
+      if(navigator.share){await navigator.share(data);return;}
+      if(navigator.clipboard?.writeText){await navigator.clipboard.writeText(url);showToast('DriveSG link copied');return;}
+    }catch(err){if(err?.name==='AbortError')return;}
+    showToast('Use Safari Share → Add to Home Screen');
+  }
+
+  function recordDiagnostic(type,detail){
+    try{
+      const key='drivesg-diagnostics-v1';
+      const current=JSON.parse(localStorage.getItem(key)||'[]');
+      current.push({
+        at:new Date().toISOString(),build:BUILD_ID,type:String(type||'error').slice(0,48),
+        detail:String(detail||'').slice(0,260),mapMode,graphicsTier,
+        navigation:navigation?.active?(navigation.mode||'active'):'none'
+      });
+      while(current.length>12)current.shift();
+      localStorage.setItem(key,JSON.stringify(current));
+    }catch(_){}
+  }
+
+  function installProductionGuards(){
+    if(guardsInstalled)return;guardsInstalled=true;
+    window.addEventListener('error',e=>recordDiagnostic('window-error',e?.message||e?.error?.message||'Unknown error'));
+    window.addEventListener('unhandledrejection',e=>recordDiagnostic('promise-rejection',e?.reason?.message||e?.reason||'Unhandled rejection'));
+    window.addEventListener('offline',()=>{setMapState('offline');showToast('Offline · using cached DriveSG where available');});
+    window.addEventListener('online',()=>{setMapState(mapMode==='live'?'live':'offline');showToast('Back online');backendCircuitUntil=0;backendFailureCount=0;});
+    window.addEventListener('pagehide',()=>{
+      clearInputs();
+      engineAudio?.ctx?.suspend?.().catch?.(()=>{});
+      while(oneMapTileCache.size>32)oneMapTileCache.delete(oneMapTileCache.keys().next().value);
+    });
+    window.addEventListener('pageshow',()=>{if(engineSoundOn)engineAudio?.ctx?.resume?.().catch?.(()=>{});});
+  }
+
   function bindUi() {
     els.placesBtn.addEventListener('click',()=>setPanelOpen(!els.placesPanel.classList.contains('open')));
     els.closePanelBtn.addEventListener('click',closePanel);
@@ -3433,6 +4179,7 @@
     els.lightingBtn?.addEventListener('click',cycleLightingMode);
     els.soundBtn.addEventListener('click',toggleEngineSound);
     els.cameraBtn?.addEventListener('click',cycleCameraMode);
+    els.shareBtn?.addEventListener('click',shareDriveSG);
     els.cancelNavBtn.addEventListener('click',()=>{if(challenge.active)cancelChallenge();else clearNavigation();});
     els.navigateModeBtn.addEventListener('click',()=>setPlaceMode('navigate'));
     els.startModeBtn.addEventListener('click',()=>setPlaceMode('start'));
@@ -3564,8 +4311,10 @@
         const timeoutId=setTimeout(()=>controller.abort(),9000);
         try{
           if(BACKEND_ACTIVE){
-            const res=await fetch(`${BACKEND_BASE}/api/geocode?q=${encodeURIComponent(query)}`,{headers:{Accept:'application/json'},signal:controller.signal});
-            if(res.ok){const data=await res.json();const lat=Number(data.lat),lon=Number(data.lon);if(insideSingapore(lat,lon))place={name:data.name||query,subtitle:data.subtitle||'Search result',lat,lon};}
+            try{
+              const res=await backendFetch(`/api/geocode?q=${encodeURIComponent(query)}`,{headers:{Accept:'application/json'},signal:controller.signal});
+              if(res.ok){const data=await res.json();const lat=Number(data.lat),lon=Number(data.lon);if(insideSingapore(lat,lon))place={name:data.name||query,subtitle:data.subtitle||(data.provider?`${data.provider} result`:'Search result'),lat,lon};}
+            }catch(err){console.warn('DriveSG geocode backend bypass',err?.message||err);}
           }
           if(!place){
             const url=`${GEOCODE_ENDPOINT}?format=jsonv2&limit=1&countrycodes=sg&accept-language=en&q=${encodeURIComponent(query+', Singapore')}`;
