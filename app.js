@@ -1,7 +1,7 @@
 (() => {
   'use strict';
 
-  const BUILD_ID = '20260901realism1';
+  const BUILD_ID = '20260901fix2';
   const SG_BOUNDS = { minLat: 1.16, maxLat: 1.456, minLon: 103.60, maxLon: 104.10 };
   const CONFIG = window.DRIVESG_CONFIG || {};
   const OVERPASS_ENDPOINTS = Array.isArray(CONFIG.overpassEndpoints) && CONFIG.overpassEndpoints.length
@@ -886,6 +886,7 @@
     input.gas = input.brake = input.steer = 0;
     updateSteerKnob(0);
     showLoader(`Preparing ${currentLocationName}…`, 5);
+    let completed=false;
 
     try {
       setProgress(16, 'Reading Singapore roads + terrain…');
@@ -894,7 +895,7 @@
         fetchOsmData(place.lat, place.lon),
         fetchTerrainPatch(place.lat, place.lon)
       ]);
-      if (generation !== streamGeneration) return;
+      if (generation !== streamGeneration) return false;
       activeTerrainPatch=terrain;
       setProgress(52, terrain?'Shaping real terrain, roads and buildings…':'Drawing roads and buildings…');
       await nextPaint();
@@ -912,22 +913,52 @@
       if (!options.keepPanelOpen) { if(!options.preserveChallenge)setPlaceMode('navigate'); closePanel(); }
       showToast(`${built.roadCount} roads · ${built.buildingCount} real buildings loaded`);
       maybeShowExperienceHint();
+      completed=true;
+      return true;
     } catch (err) {
-      console.warn('Live road data unavailable. Falling back to bundled Marina Bay demo.', err);
-      if (generation !== streamGeneration) return;
+      console.warn('Live road data unavailable. Falling back to bundled demo roads.', err);
+      if (generation !== streamGeneration) return false;
       setProgress(64, 'Live map unavailable — loading offline demo roads…');
-      const built = buildFallbackWorld();
-      swapDynamicWorld(built);
-      loadedCenterWorld = { x: 0, z: 0 };
-      placeCarNear(0, 0, true);
-      mapMode = 'demo';
-      setProgress(100, 'Ready in demo road mode');
-      setMapState('offline');
-      setTimeout(hideLoader, 240);
-      showToast('Demo roads loaded — live map request failed');
-      if (!options.keepPanelOpen) { if(!options.preserveChallenge)setPlaceMode('navigate'); closePanel(); }
+      await nextPaint();
+      try {
+        let built;
+        try {
+          built = buildFallbackWorld();
+          swapDynamicWorld(built);
+        } catch (fallbackErr) {
+          console.warn('Bundled demo world failed; using emergency road grid.', fallbackErr);
+          recordDiagnostic('fallback-world-failed',fallbackErr?.message||fallbackErr);
+          setProgress(82, 'Recovering a lightweight offline road grid…');
+          await nextPaint();
+          built = buildEmergencyWorld();
+          swapDynamicWorld(built);
+        }
+        loadedCenterWorld = { x: 0, z: 0 };
+        placeCarNear(0, 0, true);
+        mapMode = 'demo';
+        setProgress(100, 'Ready in offline road mode');
+        setMapState('offline');
+        setTimeout(hideLoader, 180);
+        showToast('Offline roads ready · live map request failed');
+        if (!options.keepPanelOpen) { if(!options.preserveChallenge)setPlaceMode('navigate'); closePanel(); }
+        completed=true;
+        return true;
+      } catch (fatalFallbackErr) {
+        console.error('DriveSG could not build any drivable world.', fatalFallbackErr);
+        recordDiagnostic('emergency-world-failed',fatalFallbackErr?.message||fatalFallbackErr);
+        mapMode='demo';
+        setMapState('offline');
+        setProgress(100, 'Could not prepare roads · tap Challenges and try again');
+        hideLoader();
+        showToast('Road loading failed · please try the challenge again');
+        return false;
+      }
     } finally {
-      if (generation === streamGeneration) streamBusy = false;
+      if (generation === streamGeneration) {
+        streamBusy = false;
+        // Never leave an iPhone trapped behind the loading overlay after a failed recovery.
+        if(!completed&&els.loader&&!els.loader.classList.contains('hidden'))hideLoader();
+      }
     }
   }
 
@@ -1599,8 +1630,15 @@
     if(els.challengeHudName)els.challengeHudName.textContent=def.name;
     if(els.challengeTimer)els.challengeTimer.textContent='READY';
     if(els.challengeScore)els.challengeScore.textContent='100';
-    await loadLocation(def.start,{preserveChallenge:true,keepPanelOpen:false});
+    const loaded=await loadLocation(def.start,{preserveChallenge:true,keepPanelOpen:false});
     if(!challenge.active||challenge.id!==def.id)return;
+    if(!loaded){
+      cancelChallenge({quiet:true,keepNavigation:false});
+      setPlaceMode('challenge');
+      setPanelOpen(true);
+      showToast('Challenge could not start · try again');
+      return;
+    }
     await navigateTo(def.finish,{quiet:true,challengeRoute:true});
     if(!challenge.active||challenge.id!==def.id)return;
     beginChallengeCountdown();
@@ -2859,7 +2897,6 @@
     if(engineSoundOn)ensureEngineAudio();
     els.soundBtn.classList.toggle('sound-on',engineSoundOn);
     els.soundBtn.textContent='♪';
-    if(engineAudio?.recorded&&!engineSoundOn)engineAudio.recorded.forEach(a=>{a.volume=0;a.pause();});
     updateEngineAudio();
   }
 
@@ -2868,19 +2905,8 @@
     for(let i=0;i<a.length;i++){const white=Math.random()*2-1;last=last*.83+white*.17;a[i]=last*.72+white*.18;}return b;
   }
 
-  function createRecordedEngineLayer(){
-    try{
-      const urls=[
-        'https://opengameart.org/sites/default/files/loop_0.wav',
-        'https://opengameart.org/sites/default/files/loop_2_0.wav',
-        'https://opengameart.org/sites/default/files/loop_5_0.wav'
-      ];
-      return urls.map((url,i)=>{const a=new Audio(url);a.loop=true;a.preload='auto';a.volume=0;a.playsInline=true;a.dataset.layer=String(i);return a;});
-    }catch(_){return[];}
-  }
-
   function ensureEngineAudio() {
-    if(engineAudio){engineAudio.ctx.resume?.();engineAudio.recorded?.forEach(a=>{if(engineSoundOn&&a.paused)a.play().catch(()=>{});});return;}
+    if(engineAudio){engineAudio.ctx.resume?.().catch?.(()=>{});return;}
     try{
       const AC=window.AudioContext||window.webkitAudioContext;if(!AC)return;
       const ctx=new AC(),master=ctx.createGain(),engineFilter=ctx.createBiquadFilter(),compressor=ctx.createDynamicsCompressor();
@@ -2897,16 +2923,8 @@
       const loadSource=ctx.createBufferSource(),loadFilter=ctx.createBiquadFilter(),loadGain=ctx.createGain();loadSource.buffer=noiseBuffer;loadSource.loop=true;loadFilter.type='bandpass';loadFilter.frequency.value=380;loadFilter.Q.value=.75;loadGain.gain.value=.0001;loadSource.connect(loadFilter);loadFilter.connect(loadGain);loadGain.connect(master);loadSource.start();
       const tyreSource=ctx.createBufferSource(),tyreFilter=ctx.createBiquadFilter(),tyreGain=ctx.createGain();tyreSource.buffer=noiseBuffer;tyreSource.loop=true;tyreFilter.type='bandpass';tyreFilter.frequency.value=760;tyreFilter.Q.value=.55;tyreGain.gain.value=.0001;tyreSource.connect(tyreFilter);tyreFilter.connect(tyreGain);tyreGain.connect(ctx.destination);tyreSource.start();
       const windSource=ctx.createBufferSource(),windFilter=ctx.createBiquadFilter(),windGain=ctx.createGain();windSource.buffer=noiseBuffer;windSource.loop=true;windFilter.type='highpass';windFilter.frequency.value=980;windFilter.Q.value=.3;windGain.gain.value=.0001;windSource.connect(windFilter);windFilter.connect(windGain);windGain.connect(ctx.destination);windSource.start();
-      const recorded=createRecordedEngineLayer();
-      engineAudio={ctx,master,engineFilter,compressor,fireOsc,fireGain,mechOsc,mechGain,mechFilter,loadSource,loadFilter,loadGain,tyreSource,tyreFilter,tyreGain,windSource,windFilter,windGain,recorded};
-      if(engineSoundOn)recorded.forEach(a=>a.play().catch(()=>{}));
+      engineAudio={ctx,master,engineFilter,compressor,fireOsc,fireGain,mechOsc,mechGain,mechFilter,loadSource,loadFilter,loadGain,tyreSource,tyreFilter,tyreGain,windSource,windFilter,windGain};
     }catch(err){console.warn('Engine audio unavailable',err);engineSoundOn=false;}
-  }
-
-  function recordedLayerMix(rpm){
-    const x=THREE.MathUtils.clamp((rpm-ENGINE_IDLE_RPM)/(ENGINE_REDLINE_RPM-ENGINE_IDLE_RPM),0,1);
-    const low=THREE.MathUtils.clamp(1-x*2.2,0,1),high=THREE.MathUtils.clamp((x-.46)*2.05,0,1),mid=THREE.MathUtils.clamp(1-Math.abs(x-.48)*2.2,0,1);
-    return [low,mid,high];
   }
 
   function updateEngineAudio() {
@@ -2921,10 +2939,6 @@
     engineAudio.loadFilter.frequency.setTargetAtTime(260+engineRpm*.095,now,.06);engineAudio.loadGain.gain.setTargetAtTime(engineSoundOn?(.001+engineLoad*.011)*shiftCut:.0001,now,.055);
     if(engineAudio.windGain){const wind=engineSoundOn?THREE.MathUtils.clamp((Math.pow(Math.abs(speedMps)/34,1.65)*.020+wetness*.0035)*(inTunnel?.38:1),.0001,.024):.0001;engineAudio.windGain.gain.setTargetAtTime(wind,now,.08);engineAudio.windFilter.frequency.setTargetAtTime(900+Math.abs(speedMps)*50,now,.10);}
     if(engineAudio.tyreGain){const scrub=engineSoundOn?THREE.MathUtils.clamp(tyreSlip*.045+(onRoad?wetness*.004:.012)*Math.min(Math.abs(speedMps)/15,1),.0001,.029):.0001;engineAudio.tyreGain.gain.setTargetAtTime(scrub,now,.035);engineAudio.tyreFilter.frequency.setTargetAtTime(620+Math.abs(speedMps)*24+tyreSlip*620,now,.05);}
-    if(engineAudio.recorded?.length){
-      const mix=recordedLayerMix(engineRpm),rate=THREE.MathUtils.clamp(.78+(engineRpm/ENGINE_REDLINE_RPM)*.55,.78,1.34);
-      engineAudio.recorded.forEach((a,i)=>{a.playbackRate=rate*(i===0?.94:(i===2?1.035:1));a.volume=engineSoundOn?mix[i]*(i===1?.24:.17)*shiftCut*(inTunnel?1.08:1):0;if(engineSoundOn&&a.paused)a.play().catch(()=>{});});
-    }
   }
 
   function playGearShiftSound(){
@@ -4349,6 +4363,26 @@
     for(let y=12;y<126;y+=13){const slit=new THREE.Mesh(new THREE.BoxGeometry(23.4,2.4,31.4),dark);slit.position.set(x,y,z);group.add(slit);}
   }
 
+  function buildEmergencyWorld() {
+    const group=new THREE.Group(),segments=[],roadVerts=[],lineVerts=[];
+    const roads=[
+      [[-420,0],[420,0]],
+      [[0,-330],[0,330]],
+      [[-360,-220],[-180,-80],[0,0],[180,90],[360,230]],
+      [[-360,220],[-180,90],[0,0],[190,-95],[360,-220]]
+    ];
+    roads.forEach((line,idx)=>{
+      const points=line.map(([x,z])=>({x,z}));
+      for(let i=0;i<points.length-1;i++){
+        const seg={ax:points[i].x,az:points[i].z,bx:points[i+1].x,bz:points[i+1].z,width:9,major:true,lanes:2,type:'primary',oneway:'',name:'DriveSG offline road',speedLimit:50};
+        segments.push(seg);appendRoadQuad(roadVerts,seg,.025);appendCenterDashes(lineVerts,seg);
+      }
+    });
+    const roadMesh=meshFromFlatVertices(roadVerts,shared.road,true);if(roadMesh)group.add(roadMesh);
+    const lineMesh=meshFromFlatVertices(lineVerts,shared.line,false);if(lineMesh)group.add(lineMesh);
+    return {group,segments,roadCount:roads.length,buildingCount:0,buildingColliders:[],waterPolygons:[],parkPolygons:[],treeCount:0,roadGraph:buildRoadGraph(segments),signalDescriptors:[],busStopDescriptors:[],trafficSignalCount:0};
+  }
+
   function buildFallbackWorld() {
     const group=new THREE.Group();
     const segments=[];
@@ -4411,9 +4445,9 @@
     activeTerrainPatch=built.terrainPatch||null;
     rebuildRoadIndex();
     rebuildBuildingIndex();
-    createAmbientTraffic(dynamicWorld,roadSegments,roadGraph);
-    if(navigation.active&&navigation.mode==='route')renderNavigationWorld();
-    if(previous){scene.remove(previous);disposeWorldGroup(previous);}
+    try{createAmbientTraffic(dynamicWorld,roadSegments,roadGraph);}catch(err){console.warn('Traffic setup skipped',err?.message||err);ambientTraffic=[];}
+    if(navigation.active&&navigation.mode==='route')try{renderNavigationWorld();}catch(err){console.warn('Route redraw skipped',err?.message||err);}
+    if(previous){scene.remove(previous);try{disposeWorldGroup(previous);}catch(err){console.warn('Previous world cleanup skipped',err?.message||err);}}
     console.info(`DriveSG world: ${built.roadCount} road ways, ${built.buildingCount} buildings, ${built.trafficSignalCount||0} signals, ${built.streetLightCount||0} lights, ${built.roadSignCount||0} road signs, ${(built.treeCount||0)+(built.tropicalPlantCount||0)} plants, ${built.segments.length} segments`);
   }
 
@@ -5034,10 +5068,9 @@
     window.addEventListener('pagehide',()=>{
       clearInputs();
       engineAudio?.ctx?.suspend?.().catch?.(()=>{});
-      engineAudio?.recorded?.forEach(a=>{a.volume=0;a.pause();});
       while(oneMapTileCache.size>32)oneMapTileCache.delete(oneMapTileCache.keys().next().value);
     });
-    window.addEventListener('pageshow',()=>{if(engineSoundOn){engineAudio?.ctx?.resume?.().catch?.(()=>{});engineAudio?.recorded?.forEach(a=>a.play().catch(()=>{}));}});
+    window.addEventListener('pageshow',()=>{if(engineSoundOn)engineAudio?.ctx?.resume?.().catch?.(()=>{});});
   }
 
   function bindFreeLook(canvas){
