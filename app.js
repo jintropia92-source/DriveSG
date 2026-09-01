@@ -1,7 +1,7 @@
 (() => {
   'use strict';
 
-  const BUILD_ID = '20260902fidelity1';
+  const BUILD_ID = '20260902roadfix1';
   const SG_BOUNDS = { minLat: 1.3270, maxLat: 1.3425, minLon: 103.8420, maxLon: 103.8595 }; // compact Toa Payoh core only
   const CONFIG = window.DRIVESG_CONFIG || {};
   const OVERPASS_ENDPOINTS = Array.isArray(CONFIG.overpassEndpoints) && CONFIG.overpassEndpoints.length
@@ -37,9 +37,8 @@
   const MAX_ROAD_NAME_SIGNS = 22;
   const MAX_TROPICAL_PLANTS = 240;
   const MAX_STREET_LIGHTS = 230;
-  const MAX_PARKED_VEHICLES = 82;
+  const MAX_PARKED_VEHICLES = 42;
   const MAX_COVERED_WALKWAYS = 34;
-  const MAX_SG_ROAD_ARROWS = 120;
   const MAX_PEDESTRIAN_RAIL_SECTIONS = 52;
   const BRIDGE_BASE_HEIGHT = 5.4;
   const PERFORMANCE_TARGET_FPS = 50;
@@ -641,11 +640,11 @@
 
   function makeSharedMaterials() {
     const asphaltTex=makeSurfaceTexture('asphalt'),concreteTex=makeSurfaceTexture('concrete'),facadeTex=makeSurfaceTexture('facade'),glassTex=makeSurfaceTexture('glass'),grassTex=makeSurfaceTexture('grass');
-    shared.sidewalk = new THREE.MeshStandardMaterial({ color: 0xa7a59e, map:concreteTex, roughness: .96, metalness: 0, side: THREE.DoubleSide });shared.sidewalk.userData.uvScale=.18;
-    shared.roadEdge = new THREE.MeshStandardMaterial({ color: 0x737773, map:asphaltTex, roughness: .98, metalness: 0, side: THREE.DoubleSide });shared.roadEdge.userData.uvScale=.16;
-    shared.road = new THREE.MeshStandardMaterial({ color: 0x3c4145, map:asphaltTex, roughness: 0.94, metalness: 0, side: THREE.DoubleSide });shared.road.userData.uvScale=.16;
-    shared.majorRoad = new THREE.MeshStandardMaterial({ color: 0x31363a, map:asphaltTex, roughness: 0.93, metalness: 0, side: THREE.DoubleSide });shared.majorRoad.userData.uvScale=.16;
-    shared.line = new THREE.MeshBasicMaterial({ color: 0xf0ead7, transparent: true, opacity: 0.86, depthWrite: false, side: THREE.DoubleSide });
+    shared.sidewalk = new THREE.MeshStandardMaterial({ color: 0xa5a6a2, map:concreteTex, roughness: .97, metalness: 0, side: THREE.DoubleSide });shared.sidewalk.userData.uvScale=.18;
+    shared.roadEdge = new THREE.MeshStandardMaterial({ color: 0x585d5e, map:asphaltTex, roughness: .98, metalness: 0, side: THREE.DoubleSide });shared.roadEdge.userData.uvScale=.055;
+    shared.road = new THREE.MeshStandardMaterial({ color: 0x3b3f41, map:asphaltTex, roughness: 0.95, metalness: 0, side: THREE.DoubleSide });shared.road.userData.uvScale=.055;
+    shared.majorRoad = new THREE.MeshStandardMaterial({ color: 0x34383a, map:asphaltTex, roughness: 0.94, metalness: 0, side: THREE.DoubleSide });shared.majorRoad.userData.uvScale=.055;
+    shared.line = new THREE.MeshBasicMaterial({ color: 0xf6f5ee, transparent: true, opacity: 0.94, depthWrite: false, side: THREE.DoubleSide });
     shared.median = new THREE.MeshStandardMaterial({ color: 0x697665, roughness: 1, metalness: 0, side: THREE.DoubleSide });
     shared.bridge = new THREE.MeshStandardMaterial({ color: 0x6f7577, roughness: .92, metalness: .04, side: THREE.DoubleSide });
     shared.tunnel = new THREE.MeshStandardMaterial({ color: 0x2d3437, roughness: .94, metalness: 0, side: THREE.DoubleSide });
@@ -666,14 +665,14 @@
     ];
     shared.buildings.forEach((m,i)=>m.userData.uvScale=(i===4||i===6)?.060:.085);
     shared.rooftop = new THREE.MeshStandardMaterial({color:0x777d7d,map:concreteTex,roughness:.82,metalness:.04,side:THREE.DoubleSide});shared.rooftop.userData.uvScale=.16;
-    shared.curb = new THREE.MeshStandardMaterial({color:0xd8d6cf,map:concreteTex,roughness:.92,metalness:0,side:THREE.DoubleSide});shared.curb.userData.uvScale=.22;
+    shared.curb = new THREE.MeshStandardMaterial({color:0xb9bab6,map:concreteTex,roughness:.94,metalness:0,side:THREE.DoubleSide});shared.curb.userData.uvScale=.22;
     shared.windows = new THREE.MeshStandardMaterial({ color: 0x314650, map:glassTex, emissive: 0x14232d, emissiveIntensity: .08, roughness: .22, metalness: .10, side: THREE.DoubleSide });shared.windows.userData.uvScale=.09;
     shared.storefront = new THREE.MeshStandardMaterial({ color: 0x395967, emissive: 0x20343e, emissiveIntensity: .12, roughness: .24, metalness: .10, side: THREE.DoubleSide });
     shared.hdbCorridor = new THREE.MeshStandardMaterial({ color: 0xd9d4c8, roughness: .84, metalness: 0, side: THREE.DoubleSide });
     shared.officeBand = new THREE.MeshStandardMaterial({ color: 0x496875, map:glassTex, emissive: 0x152833, emissiveIntensity: .06, roughness: .23, metalness: .12, side: THREE.DoubleSide });shared.officeBand.userData.uvScale=.075;
     shared.awning = new THREE.MeshStandardMaterial({ color: 0x8f4f42, roughness: .78, metalness: 0, side: THREE.DoubleSide });
-    shared.markingYellow = new THREE.MeshBasicMaterial({ color: 0xe8ca58, transparent: true, opacity: .92, depthWrite: false, side: THREE.DoubleSide });
-    shared.drain = new THREE.MeshStandardMaterial({ color: 0x4d5354, roughness: .98, metalness: 0, side: THREE.DoubleSide });
+    shared.markingYellow = new THREE.MeshBasicMaterial({ color: 0xf0c92f, transparent: true, opacity: .94, depthWrite: false, side: THREE.DoubleSide });
+    shared.drain = new THREE.MeshStandardMaterial({ color: 0x414647, roughness: .99, metalness: 0, side: THREE.DoubleSide });
     shared.hdbAccent = new THREE.MeshStandardMaterial({ color: 0xa56f5d, roughness: .82, metalness: 0, side: THREE.DoubleSide });
     shared.walkwayRoof = new THREE.MeshStandardMaterial({ color: 0xb9beb9, roughness: .84, metalness: .02 });
     shared.walkwayPole = new THREE.MeshStandardMaterial({ color: 0x777e7b, roughness: .88, metalness: .04 });
@@ -2753,10 +2752,11 @@
     if(!trafficSignalVisuals||elapsed-lastSignalVisualUpdate<.11)return;
     lastSignalVisualUpdate=elapsed;
     const {points,reds,ambers,greens}=trafficSignalVisuals;
-    const m=new THREE.Matrix4(),pos=new THREE.Vector3(),quat=new THREE.Quaternion(),scale=new THREE.Vector3();
+    const m=new THREE.Matrix4(),pos=new THREE.Vector3(),quat=new THREE.Quaternion(),scale=new THREE.Vector3(),axis=new THREE.Vector3(0,1,0);
     for(let i=0;i<points.length;i++){
-      const p=points[i],y=p.y||0,phase=trafficSignalPhaseFor(p,elapsed);
-      const setLamp=(mesh,py,active)=>{scale.setScalar(active?1.18:.42);pos.set(p.x,y+py,p.z-.15);m.compose(pos,quat,scale);mesh.setMatrixAt(i,m);};
+      const p=points[i],y=p.y||0,phase=trafficSignalPhaseFor(p,elapsed),sx=Number.isFinite(p.visualX)?p.visualX:p.x,sz=Number.isFinite(p.visualZ)?p.visualZ:p.z,yaw=Number(p.visualYaw)||0,fx=Number.isFinite(p.visualFaceX)?p.visualFaceX:0,fz=Number.isFinite(p.visualFaceZ)?p.visualFaceZ:-.15;
+      quat.setFromAxisAngle(axis,yaw);
+      const setLamp=(mesh,py,active)=>{scale.setScalar(active?1.18:.42);pos.set(sx+fx,y+py,sz+fz);m.compose(pos,quat,scale);mesh.setMatrixAt(i,m);};
       setLamp(reds,2.86,phase==='red');setLamp(ambers,2.62,phase==='amber');setLamp(greens,2.38,phase==='green');
     }
     reds.instanceMatrix.needsUpdate=true;ambers.instanceMatrix.needsUpdate=true;greens.instanceMatrix.needsUpdate=true;
@@ -3073,7 +3073,7 @@
         if(!insideSingapore(el.lat,el.lon))continue;
         const p=project(el.lat,el.lon),dist=Math.hypot(p.x-centerX,p.z-centerZ);
         if(tags.highway==='traffic_signals'&&dist<=SIGNAL_RADIUS_METERS+80&&signalPoints.length<MAX_TRAFFIC_SIGNALS){signalPoints.push({...p,id:el.id});continue;}
-        if(tags.highway==='crossing'&&dist<=SIGNAL_RADIUS_METERS+80&&crossingPoints.length<MAX_CROSSINGS){crossingPoints.push(p);continue;}
+        if(tags.highway==='crossing'&&dist<=SIGNAL_RADIUS_METERS+80&&crossingPoints.length<MAX_CROSSINGS){crossingPoints.push({...p,tags:{...tags}});continue;}
         if(tags.highway==='bus_stop'&&dist<=SIGNAL_RADIUS_METERS+80&&busStopPoints.length<MAX_BUS_STOPS){busStopPoints.push({...p,id:el.id});continue;}
       }
       if (!Array.isArray(el.geometry) || el.geometry.length < 2) continue;
@@ -3099,13 +3099,17 @@
           points[points.length-1].y=terrainHeightAt(points[points.length-1].x,points[points.length-1].z,terrainPatch)+approachY;
         }
 
-        // Pavement/shoulder first, then curb/edge, then asphalt. Terrain height is carried
-        // by every road point so sloped Singapore roads remain continuously drivable.
+        // Keep the carriageway visually compact. The previous fidelity pass used wide
+        // concentric ribbons with rounded caps, which produced bulbous junctions and a
+        // grey halo around minor streets. Singapore town roads usually read as asphalt,
+        // kerb/drain, then pavement — not a broad asphalt shoulder.
         const y0=points[0].y||0;
-        if(!/motorway/.test(type)) appendRoadRibbon(sidewalkVerts, points, width + (major ? 3.3 : 4.8), y0 + .006, true);
-        appendRoadRibbon(edgeVerts, points, width + (major ? 1.7 : 2.15), y0 + .019, true);
-        appendRoadRibbon(major ? majorVerts : roadVerts, points, width, y0 + .043, true);
-        if(lanes>=4&&!/^(yes|1|-1)$/.test(String(oneway))&&!isTunnel) appendRoadRibbon(medianVerts,points,Math.min(1.35,width*.09),y0+.072,false);
+        if(!/motorway/.test(type)) appendRoadRibbon(sidewalkVerts, points, width + (major ? 2.7 : 3.35), y0 + .006, false);
+        appendRoadRibbon(edgeVerts, points, width + (major ? .85 : .68), y0 + .019, false);
+        appendRoadRibbon(major ? majorVerts : roadVerts, points, width, y0 + .043, false);
+        // Do not infer a grass median from lane count alone. OSM divided carriageways are
+        // normally represented as separate ways; an invented centre strip looked wrong on
+        // ordinary four-lane Toa Payoh roads.
 
         const waySegments = [];
         const nodeIds=Array.isArray(el.nodes)?el.nodes:[];
@@ -3140,7 +3144,7 @@
           if(isTunnel)appendTunnelStructure(tunnelStructureVerts,seg);
         }
         appendWayLaneMarkings(lineVerts, waySegments, width, lanes, oneway);
-        if(!/motorway|trunk/.test(type)){for(const seg of waySegments){const off=Math.max(.85,seg.width/2+.22);appendOffsetSolidLine(curbVerts,seg,off,.11);appendOffsetSolidLine(curbVerts,seg,-off,.11);}}
+        if(!/motorway|trunk/.test(type)){for(const seg of waySegments){const off=Math.max(.85,seg.width/2+.22);appendOffsetSolidLine(curbVerts,seg,off,.08);appendOffsetSolidLine(curbVerts,seg,-off,.08);}}
         roadCount++;
       } else if (tags.building || tags['building:part']) {
         const b = buildingDescriptor(el, normalizedCenter, terrainPatch);
@@ -3739,8 +3743,9 @@
         if(ml<.08){mx=nn.x;mz=nn.z;}
         else{mx/=ml;mz/=ml;}
         const denom=mx*nn.x+mz*nn.z;
-        let miter=half/Math.max(.34,Math.abs(denom));
-        miter=Math.min(miter,half*2.15);
+        let miter=half/Math.max(.52,Math.abs(denom));
+        // Clamp acute bends to a soft bevel-like join instead of long triangular spikes.
+        miter=Math.min(miter,half*1.52);
         ox=mx*miter;oz=mz*miter;
       }
       const py=Number.isFinite(p.y)?p.y+yOffset:y;
@@ -3781,18 +3786,22 @@
 
   function appendWayLaneMarkings(out, segments, width, lanes, oneway) {
     if(!segments.length)return;
-    if(lanes>=2){
-      const offsets=[];
-      for(let i=1;i<lanes;i++) offsets.push(-width/2+(width*i/lanes));
-      // A mapped one-way carriageway has only same-direction lane dividers. A normal
-      // two-way road also uses the center divider from the same calculated offsets.
-      for(const seg of segments) for(const offset of offsets) appendOffsetDashes(out,seg,offset);
-    }
+    const oneWay=/^(yes|1|-1|true)$/.test(String(oneway||'').toLowerCase());
+    const safeLanes=Math.max(1,Number(lanes)||1);
     for(const seg of segments){
-      if(/motorway|trunk|primary/.test(seg.type||'')){
-        const edge=Math.max(.7,width/2-.24);
-        appendOffsetSolidLine(out,seg,edge,.075);
-        appendOffsetSolidLine(out,seg,-edge,.075);
+      const segWidth=Number(seg.width)||width||6;
+      const laneWidth=segWidth/safeLanes;
+      if(safeLanes>=2){
+        for(let i=1;i<safeLanes;i++){
+          const offset=-segWidth/2+laneWidth*i;
+          const isCentre=!oneWay&&safeLanes%2===0&&i===safeLanes/2;
+          appendOffsetDashes(out,seg,offset,isCentre?.082:.060,isCentre?3.2:2.7,isCentre?6.1:6.6);
+        }
+      }
+      if(/primary/.test(seg.type||'')){
+        const edge=Math.max(.7,segWidth/2-.22);
+        appendOffsetSolidLine(out,seg,edge,.055);
+        appendOffsetSolidLine(out,seg,-edge,.055);
       }
     }
   }
@@ -3806,12 +3815,12 @@
     pushTri(out,[ax+px,yA,az+pz],[bx-px,yB,bz-pz],[bx+px,yB,bz+pz]);
   }
 
-  function appendOffsetDashes(out, seg, offset) {
+  function appendOffsetDashes(out, seg, offset, half=.065, dash=3.2, gap=6.4) {
     const dx=seg.bx-seg.ax,dz=seg.bz-seg.az,len=Math.hypot(dx,dz)||1;
     if(len<7)return;
     const ux=dx/len,uz=dz/len,nx=-uz,nz=ux;
-    const dash=4.4,gap=6.8,step=dash+gap,half=.075;
-    for(let start=2.4;start<len-1;start+=step){
+    const step=dash+gap;
+    for(let start=2.2;start<len-1;start+=step){
       const end=Math.min(len-.6,start+dash);
       const ax=seg.ax+ux*start+nx*offset,az=seg.az+uz*start+nz*offset;
       const bx=seg.ax+ux*end+nx*offset,bz=seg.az+uz*end+nz*offset;
@@ -3924,12 +3933,21 @@
     const greens=new THREE.InstancedMesh(lampGeo,shared.signalGreen,count);
     const m=new THREE.Matrix4(),pos=new THREE.Vector3(),quat=new THREE.Quaternion(),scale=new THREE.Vector3(1,1,1);
     for(let i=0;i<count;i++){
-      const p=points[i],y=p.y||0;
-      pos.set(p.x,y+1.275,p.z);m.compose(pos,quat,scale);poles.setMatrixAt(i,m);
-      pos.set(p.x,y+2.62,p.z);m.compose(pos,quat,scale);heads.setMatrixAt(i,m);
-      pos.set(p.x,y+2.86,p.z-.15);m.compose(pos,quat,scale);reds.setMatrixAt(i,m);
-      pos.set(p.x,y+2.62,p.z-.15);m.compose(pos,quat,scale);ambers.setMatrixAt(i,m);
-      pos.set(p.x,y+2.38,p.z-.15);m.compose(pos,quat,scale);greens.setMatrixAt(i,m);
+      const p=points[i],y=p.y||0,seg=p.seg;
+      let sx=p.x,sz=p.z,yaw=0;
+      if(seg){
+        const dx=seg.bx-seg.ax,dz=seg.bz-seg.az,len=Math.hypot(dx,dz)||1,nx=-dz/len,nz=dx/len;
+        const side=((Number(p.clusterId)||0)+(Number(p.phaseGroup)||0)+i)%2?1:-1,off=seg.width/2+.72;
+        sx+=nx*off*side;sz+=nz*off*side;yaw=Math.atan2(dx,dz);
+      }
+      p.visualX=sx;p.visualZ=sz;p.visualYaw=yaw;p.visualFaceX=Math.sin(yaw)*-.15;p.visualFaceZ=Math.cos(yaw)*-.15;
+      quat.setFromAxisAngle(new THREE.Vector3(0,1,0),yaw);
+      pos.set(sx,y+1.275,sz);m.compose(pos,quat,scale);poles.setMatrixAt(i,m);
+      pos.set(sx,y+2.62,sz);m.compose(pos,quat,scale);heads.setMatrixAt(i,m);
+      const faceX=Math.sin(yaw)*-.15,faceZ=Math.cos(yaw)*-.15;
+      pos.set(sx+faceX,y+2.86,sz+faceZ);m.compose(pos,quat,scale);reds.setMatrixAt(i,m);
+      pos.set(sx+faceX,y+2.62,sz+faceZ);m.compose(pos,quat,scale);ambers.setMatrixAt(i,m);
+      pos.set(sx+faceX,y+2.38,sz+faceZ);m.compose(pos,quat,scale);greens.setMatrixAt(i,m);
     }
     [poles,heads,reds,ambers,greens].forEach(mesh=>{mesh.instanceMatrix.needsUpdate=true;mesh.castShadow=false;mesh.receiveShadow=false;group.add(mesh);});
     return {count,visuals:{points:points.slice(0,count),poles,heads,reds,ambers,greens}};
@@ -3946,22 +3964,28 @@
       }
       if(!best||best.dist>12)continue;
       const seg=best.seg,dx=seg.bx-seg.ax,dz=seg.bz-seg.az,len=Math.hypot(dx,dz)||1,ux=dx/len,uz=dz/len,nx=-uz,nz=ux;
-      const halfAcross=Math.max(2.1,seg.width*.43),stripeHalf=.23;
-      for(let k=-2;k<=2;k++){
-        const along=k*1.05,cx=best.x+ux*along,cz=best.z+uz*along;
-        const y=segmentYAt(seg,best.t)+.082;
-        const a=[cx+nx*halfAcross+ux*stripeHalf,y,cz+nz*halfAcross+uz*stripeHalf];
-        const b=[cx-nx*halfAcross+ux*stripeHalf,y,cz-nz*halfAcross+uz*stripeHalf];
-        const c=[cx-nx*halfAcross-ux*stripeHalf,y,cz-nz*halfAcross-uz*stripeHalf];
-        const d=[cx+nx*halfAcross-ux*stripeHalf,y,cz+nz*halfAcross-uz*stripeHalf];
-        pushTri(verts,a,b,c);pushTri(verts,a,c,d);
+      const y=segmentYAt(seg,best.t)+.083,halfAcross=Math.max(2.15,seg.width*.46);
+      const crossing=String(p.tags?.crossing||p.tags?.crossing_ref||'').toLowerCase();
+      const zebra=/zebra|uncontrolled/.test(crossing);
+      if(zebra){
+        for(let k=-3;k<=3;k++){
+          const along=k*.72,cx=best.x+ux*along,cz=best.z+uz*along;
+          appendRoadMarkingRect(verts,cx,cz,ux,uz,nx,nz,.22,halfAcross,y);
+        }
+      }else{
+        const rowOffset=1.75,block=.21,gap=.30,step=(block*2)+gap;
+        for(const row of [-rowOffset,rowOffset]){
+          for(let across=-halfAcross+block;across<=halfAcross-block;across+=step){
+            const cx=best.x+ux*row+nx*across,cz=best.z+uz*row+nz*across;
+            appendRoadMarkingRect(verts,cx,cz,ux,uz,nx,nz,block,block,y);
+          }
+        }
       }
       count++;if(count>=MAX_CROSSINGS)break;
     }
     if(verts.length){const mesh=meshFromFlatVertices(verts,shared.line,false);mesh.renderOrder=5;group.add(mesh);}
     return count;
   }
-
 
   function appendRoadMarkingRect(out,cx,cz,ux,uz,nx,nz,alongHalf,acrossHalf,y){
     const a=[cx-ux*alongHalf-nx*acrossHalf,y,cz-uz*alongHalf-nz*acrossHalf];
@@ -3987,7 +4011,7 @@
 
   function addJunctionRoadMarkings(group,segments,signals=[]){
     const white=[],yellow=[];let count=0;
-    const signalClusters=new Map();
+    const signalClusters=new Map(),paintedApproaches=new Set();
     for(const sig of signals){
       const key=String(sig.clusterId??sig.id);
       if(!signalClusters.has(key))signalClusters.set(key,[]);
@@ -3995,35 +4019,56 @@
       const seg=sig.seg;if(!seg)continue;
       const dx=seg.bx-seg.ax,dz=seg.bz-seg.az,len=Math.hypot(dx,dz)||1,ux=dx/len,uz=dz/len,nx=-uz,nz=ux;
       const t=THREE.MathUtils.clamp(sig.t-.018,0.03,.97),cx=seg.ax+dx*t,cz=seg.az+dz*t,y=segmentYAt(seg,t)+.085;
-      appendRoadMarkingRect(white,cx,cz,ux,uz,nx,nz,.19,Math.max(1.9,seg.width*.46),y);
-      if(seg.lanes>=2&&len>25){
-        const offset=trafficLaneOffset(seg,1,0);
-        const raw=String(seg.turnLanesForward||seg.turnLanes||'').toLowerCase();
-        const kind=raw.includes('left')&&!raw.includes('right')?'left':raw.includes('right')&&!raw.includes('left')?'right':'straight';
-        appendDirectionArrow(white,seg,THREE.MathUtils.clamp(sig.t-.075,.08,.9),offset,kind);
+      const roadAngle=Math.atan2(dz,dx),approachKey=`${sig.clusterId??sig.id}:${sig.phaseGroup??0}:${Math.round(roadAngle*8)}`;
+      if(!paintedApproaches.has(approachKey)){
+        paintedApproaches.add(approachKey);
+        appendRoadMarkingRect(white,cx,cz,ux,uz,nx,nz,.16,Math.max(1.9,seg.width*.46),y);
+        if(seg.lanes>=2&&len>25){
+          const raw=String(seg.turnLanesForward||seg.turnLanes||'').toLowerCase();
+          if(raw){
+            const offset=trafficLaneOffset(seg,1,0);
+            const kind=raw.includes('left')&&!raw.includes('right')?'left':raw.includes('right')&&!raw.includes('left')?'right':'straight';
+            appendDirectionArrow(white,seg,THREE.MathUtils.clamp(sig.t-.075,.08,.9),offset,kind);
+          }
+        }
       }
       count++;
     }
-    // Singapore's yellow box-junction language is visually distinctive. Approximate it only
-    // at true multi-approach signal clusters to avoid painting every minor crossing.
     for(const list of signalClusters.values()){
-      if(list.length<2)continue;
-      let cx=0,cz=0;for(const s of list){cx+=s.x;cz+=s.z;}cx/=list.length;cz/=list.length;
+      if(list.length<3)continue;
+      let cx=0,cz=0;for(const q of list){cx+=q.x;cz+=q.z;}cx/=list.length;cz/=list.length;
       const first=list[0].seg;if(!first)continue;
       const dx=first.bx-first.ax,dz=first.bz-first.az,len=Math.hypot(dx,dz)||1,ux=dx/len,uz=dz/len,nx=-uz,nz=ux;
-      const size=THREE.MathUtils.clamp(Math.max(...list.map(s=>s.seg?.width||6))*1.05,6.5,13),y=(first.y||0)+.087;
+      const size=THREE.MathUtils.clamp(Math.max(...list.map(q=>q.seg?.width||6))*.82,5.5,10.5),y=(first.y||0)+.087;
+      appendRoadMarkingRect(yellow,cx+ux*size/2,cz+uz*size/2,nx,nz,ux,uz,size/2,.06,y);
+      appendRoadMarkingRect(yellow,cx-ux*size/2,cz-uz*size/2,nx,nz,ux,uz,size/2,.06,y);
+      appendRoadMarkingRect(yellow,cx+nx*size/2,cz+nz*size/2,ux,uz,nx,nz,size/2,.06,y);
+      appendRoadMarkingRect(yellow,cx-nx*size/2,cz-nz*size/2,ux,uz,nx,nz,size/2,.06,y);
       for(const sign of [-1,1]){
-        for(let off=-size*.34;off<=size*.34;off+=size*.34){
-          const sx=cx+nx*off,sz=cz+nz*off;
-          const aCx=sx+ux*off*sign*.12,aCz=sz+uz*off*sign*.12;
-          const dUx=(ux+nx*sign),dUz=(uz+nz*sign),dl=Math.hypot(dUx,dUz)||1;
-          appendRoadMarkingRect(yellow,aCx,aCz,dUx/dl,dUz/dl,-dUz/dl,dUx/dl,size*.58,.055,y);
-        }
+        const dux=(ux+nx*sign),duz=(uz+nz*sign),dl=Math.hypot(dux,duz)||1;
+        appendRoadMarkingRect(yellow,cx,cz,dux/dl,duz/dl,-duz/dl,dux/dl,size*.63,.055,y);
       }
     }
     if(white.length){const m=meshFromFlatVertices(white,shared.line,false);m.renderOrder=6;group.add(m);}
     if(yellow.length){const m=meshFromFlatVertices(yellow,shared.markingYellow,false);m.renderOrder=6;group.add(m);}
     return count;
+  }
+
+  function appendBusStopZigzag(out,seg,t,side){
+    const dx=seg.bx-seg.ax,dz=seg.bz-seg.az,len=Math.hypot(dx,dz)||1,ux=dx/len,uz=dz/len,nx=-uz,nz=ux;
+    const edge=(seg.width/2-.22)*side,total=Math.min(17,Math.max(10,len*.34)),steps=8,amp=.42;
+    let prev=null;
+    for(let i=0;i<=steps;i++){
+      const along=-total/2+(total*i/steps),lateral=edge+(i%2===0?-amp:amp)*side;
+      const baseT=THREE.MathUtils.clamp(t+along/len,0.02,.98);
+      const px=seg.ax+dx*baseT+nx*lateral,pz=seg.az+dz*baseT+nz*lateral,y=segmentYAt(seg,baseT)+.088;
+      if(prev){
+        const ldx=px-prev.x,ldz=pz-prev.z,ll=Math.hypot(ldx,ldz)||1,lux=ldx/ll,luz=ldz/ll,lnx=-luz,lnz=lux,hh=.055;
+        pushTri(out,[prev.x+lnx*hh,prev.y,prev.z+lnz*hh],[prev.x-lnx*hh,prev.y,prev.z-lnz*hh],[px-lnx*hh,y,pz-lnz*hh]);
+        pushTri(out,[prev.x+lnx*hh,prev.y,prev.z+lnz*hh],[px-lnx*hh,y,pz-lnz*hh],[px+lnx*hh,y,pz+lnz*hh]);
+      }
+      prev={x:px,y,z:pz};
+    }
   }
 
   function addBusStops(group,points) {
@@ -4040,15 +4085,7 @@
         const rawSide=(p.x-(seg.ax+dx*(p.t||0)))*nx+(p.z-(seg.az+dz*(p.t||0)))*nz;side=rawSide>=0?1:-1;
         const off=seg.width/2+2.1;sx=seg.ax+dx*(p.t||0)+nx*off*side;sz=seg.az+dz*(p.t||0)+nz*off*side;y=segmentYAt(seg,p.t||0);
         yaw=Math.atan2(dx,dz);
-        const ux=dx/len,uz=dz/len,laneEdge=(seg.width/2-.32)*side;
-        for(let k=-3;k<=3;k++){
-          const along=k*2.45,t0=THREE.MathUtils.clamp((p.t||0)+(along-1.15)/len,0,1),t1=THREE.MathUtils.clamp((p.t||0)+(along+1.15)/len,0,1);
-          const baseX=seg.ax+dx*(p.t||0)+nx*laneEdge,baseZ=seg.az+dz*(p.t||0)+nz*laneEdge;
-          const ax=baseX+ux*(along-1.15),az=baseZ+uz*(along-1.15),bx=baseX+ux*(along+1.15)+nx*.55*side,bz=baseZ+uz*(along+1.15)+nz*.55*side;
-          const ldx=bx-ax,ldz=bz-az,ll=Math.hypot(ldx,ldz)||1,lux=ldx/ll,luz=ldz/ll,lnx=-luz,lnz=lux,hh=.055,yy=segmentYAt(seg,(t0+t1)/2)+.088;
-          pushTri(yellow,[ax+lnx*hh,yy,az+lnz*hh],[ax-lnx*hh,yy,az-lnz*hh],[bx-lnx*hh,yy,bz-lnz*hh]);
-          pushTri(yellow,[ax+lnx*hh,yy,az+lnz*hh],[bx-lnx*hh,yy,bz-lnz*hh],[bx+lnx*hh,yy,bz+lnz*hh]);
-        }
+        appendBusStopZigzag(yellow,seg,p.t||0,side);
         if(shelterItems.length<38&&pseudoRandom((p.id||i)*.019)>.28){
           shelterItems.push({x:sx+nx*side*1.2,z:sz+nz*side*1.2,y,yaw});
         }
@@ -4077,33 +4114,20 @@
   }
 
   function addSingaporeRoadSurfaceDetails(group,segments,centerX,centerZ){
-    const white=[],yellow=[],drains=[];let arrows=0,detailCount=0;
+    const drains=[];let detailCount=0;
     for(let i=0;i<segments.length;i++){
       const seg=segments[i];if(seg.tunnel||seg.bridge)continue;
-      const dx=seg.bx-seg.ax,dz=seg.bz-seg.az,len=Math.hypot(dx,dz);if(len<12)continue;
-      const mx=(seg.ax+seg.bx)/2,mz=(seg.az+seg.bz)/2,dist=Math.hypot(mx-centerX,mz-centerZ);if(dist>1180)continue;
-      const seed=i*97+seg.ax*.17+seg.az*.23;
-      // Narrow dark drain channels beside ordinary town roads are a strong Singapore streetscape cue.
-      if(!seg.major&&dist<900&&pseudoRandom(seed+1)>.32){
-        const off=seg.width/2+1.02;appendOffsetSolidLine(drains,seg,off,.15);appendOffsetSolidLine(drains,seg,-off,.15);detailCount+=2;
-      }
-      // Deterministic single/double yellow kerb lines: enough to read as Singapore without painting every street.
-      if(!/service|living_street/.test(seg.type||'')&&pseudoRandom(seed+5)>.68){
-        const side=pseudoRandom(seed+7)>.5?1:-1,off=(seg.width/2-.18)*side;
-        appendOffsetSolidLine(yellow,seg,off,.055);detailCount++;
-        if(pseudoRandom(seed+9)>.72)appendOffsetSolidLine(yellow,seg,off-side*.16,.045);
-      }
-      if(arrows>=MAX_SG_ROAD_ARROWS||len<44||/service|living_street/.test(seg.type||''))continue;
-      if(pseudoRandom(seed+13)>.52){
-        const lane=seg.lanes>=2?Math.min(seg.width*.22,1.9):0;
-        appendDirectionArrow(white,seg,THREE.MathUtils.clamp(.38+pseudoRandom(seed+15)*.22,.25,.72),-lane,'straight');arrows++;
-        if(!/^(yes|1|-1)$/.test(String(seg.oneway||''))&&arrows<MAX_SG_ROAD_ARROWS){appendDirectionArrow(white,reversedRoadSegment(seg),.55,-lane,'straight');arrows++;}
+      const dx=seg.bx-seg.ax,dz=seg.bz-seg.az,len=Math.hypot(dx,dz);if(len<16)continue;
+      const mx=(seg.ax+seg.bx)/2,mz=(seg.az+seg.bz)/2,dist=Math.hypot(mx-centerX,mz-centerZ);if(dist>1050)continue;
+      if(/residential|tertiary|unclassified/.test(seg.type||'')){
+        const off=seg.width/2+.38;
+        appendOffsetSolidLine(drains,seg,off,.075);
+        appendOffsetSolidLine(drains,seg,-off,.075);
+        detailCount+=2;
       }
     }
-    if(white.length){const mesh=meshFromFlatVertices(white,shared.line,false);mesh.renderOrder=6;mesh.userData.qualityLayer='detail';group.add(mesh);}
-    if(yellow.length){const mesh=meshFromFlatVertices(yellow,shared.markingYellow,false);mesh.renderOrder=6;mesh.userData.qualityLayer='detail';group.add(mesh);}
     if(drains.length){const mesh=meshFromFlatVertices(drains,shared.drain,false);mesh.renderOrder=3;mesh.userData.qualityLayer='detail';group.add(mesh);}
-    return detailCount+arrows;
+    return detailCount;
   }
 
   function addPedestrianRailings(group,segments,centerX,centerZ){
@@ -4148,12 +4172,12 @@
   function addParkedVehicles(group,segments,centerX,centerZ,buildings=[],terrainPatch=activeTerrainPatch){
     const items=[];
     for(let i=0;i<segments.length&&items.length<MAX_PARKED_VEHICLES;i++){
-      const seg=segments[i];if(seg.tunnel||seg.bridge||!/residential|service|living_street|tertiary/.test(seg.type||''))continue;
+      const seg=segments[i];if(seg.tunnel||seg.bridge||!/residential|service|living_street/.test(seg.type||''))continue;
       const dx=seg.bx-seg.ax,dz=seg.bz-seg.az,len=Math.hypot(dx,dz);if(len<24)continue;
       const ux=dx/len,uz=dz/len,nx=-uz,nz=ux,seed=i*73+seg.ax*.21+seg.az*.19;
       const slots=Math.min(2,Math.floor(len/34));for(let k=0;k<slots&&items.length<MAX_PARKED_VEHICLES;k++){
-        if(pseudoRandom(seed+k*11)<.45)continue;const t=(k+1)/(slots+1),side=pseudoRandom(seed+k*17)>.5?1:-1,off=seg.width/2+1.85;
-        const x=seg.ax+dx*t+nx*off*side,z=seg.az+dz*t+nz*off*side;if(Math.hypot(x-centerX,z-centerZ)>950||pointHitsBuildingBounds(x,z,buildings,1.5)||insideCustomLandmarkFootprint(x,z))continue;
+        if(pseudoRandom(seed+k*11)<.64)continue;const t=(k+1)/(slots+1),side=pseudoRandom(seed+k*17)>.5?1:-1,off=Math.max(.9,seg.width/2-.96);
+        const x=seg.ax+dx*t+nx*off*side,z=seg.az+dz*t+nz*off*side;if(Math.hypot(x-centerX,z-centerZ)>850||pointHitsBuildingBounds(x,z,buildings,1.5)||insideCustomLandmarkFootprint(x,z))continue;
         items.push({x,z,y:terrainHeightAt(x,z,terrainPatch),yaw:Math.atan2(dx,dz)+(side<0?Math.PI:0),color:Math.floor(pseudoRandom(seed+k*23)*5)});
       }
     }
@@ -4390,7 +4414,13 @@
     if(Number.isFinite(explicit)&&explicit>=2&&explicit<=30)return explicit;
     const base=ROAD_WIDTHS[tags.highway]||5.5;
     const lanes=Number.parseInt(tags.lanes,10);
-    if(Number.isFinite(lanes)&&lanes>0)return Math.max(base,Math.min(18,lanes*3.05+.55));
+    if(Number.isFinite(lanes)&&lanes>0){
+      // OSM lane counts are not equally complete on every adjoining way. Let lane tags
+      // influence width without allowing one tagged segment to balloon far wider than the
+      // same road immediately beside it.
+      const laneEstimate=lanes*3.0+.25;
+      return THREE.MathUtils.clamp(Math.max(base,laneEstimate),base*.94,Math.min(16,base*1.23));
+    }
     return base;
   }
   function isMajorRoad(type) { return /motorway|trunk|primary|secondary/.test(type); }
@@ -4434,21 +4464,106 @@
     const canopy=new THREE.Mesh(new THREE.CylinderGeometry(17,17,2.0,24,1,false,0,Math.PI),canopyMat);canopy.rotation.z=Math.PI/2;canopy.rotation.y=Math.PI/2;canopy.scale.y=.45;canopy.position.set(x+10,5.2,z+21);group.add(canopy);
   }
 
-  function addDragonPlayground(group,x,z){
-    const red=new THREE.MeshStandardMaterial({color:0xb84a35,roughness:.72}),white=new THREE.MeshStandardMaterial({color:0xe3ded0,roughness:.8}),blue=new THREE.MeshStandardMaterial({color:0x2d78a7,roughness:.65}),green=new THREE.MeshStandardMaterial({color:0x4f9b78,roughness:.7}),sand=new THREE.MeshStandardMaterial({color:0xd8c49d,roughness:1});
-    const base=new THREE.Mesh(new THREE.CylinderGeometry(16,16,.18,28),sand);base.scale.z=.68;base.position.set(x,.09,z);group.add(base);
-    const head=new THREE.Mesh(new THREE.BoxGeometry(7.5,8.5,2.4),red);head.position.set(x-7,4.3,z);head.rotation.z=-.12;group.add(head);
-    const snout=new THREE.Mesh(new THREE.BoxGeometry(4.7,2.7,2.7),red);snout.position.set(x-10.2,3.0,z);group.add(snout);
-    const eye=new THREE.Mesh(new THREE.CylinderGeometry(.72,.72,.18,10),white);eye.rotation.x=Math.PI/2;eye.position.set(x-8.2,6.2,z-1.28);group.add(eye);
-    const pupil=new THREE.Mesh(new THREE.CylinderGeometry(.28,.28,.19,10),blue);pupil.rotation.x=Math.PI/2;pupil.position.set(x-8.2,6.2,z-1.39);group.add(pupil);
-    for(let i=0;i<11;i++){
-      const t=i/10,px=x-3+t*17,pz=z+Math.sin(t*Math.PI)*2.3,py=4.8+Math.sin(t*Math.PI)*1.1;
-      const ring=new THREE.Mesh(new THREE.TorusGeometry(2.05,.16,6,18),i%3===0?red:(i%3===1?blue:green));ring.rotation.y=Math.PI/2;ring.position.set(px,py,pz);group.add(ring);
-      if(i%2===0){const post=new THREE.Mesh(new THREE.BoxGeometry(.28,4,.28),white);post.position.set(px,2.2,pz);group.add(post);}
+  function makeMosaicMaterial(base='#b94a35',grout='#e7e1d4',seed=1){
+    const c=document.createElement('canvas');c.width=128;c.height=128;const ctx=c.getContext('2d');
+    if(!ctx)return new THREE.MeshStandardMaterial({color:base,roughness:.82});
+    ctx.fillStyle=grout;ctx.fillRect(0,0,128,128);
+    const rgb=new THREE.Color(base),tile=9;
+    for(let yy=1;yy<128;yy+=tile)for(let xx=1;xx<128;xx+=tile){
+      const n=pseudoRandom(seed+xx*13+yy*17),v=.86+n*.22,col=rgb.clone();col.multiplyScalar(v);
+      ctx.fillStyle=`#${col.getHexString()}`;ctx.fillRect(xx,yy,tile-1.5,tile-1.5);
     }
-    const slide=new THREE.Mesh(new THREE.BoxGeometry(2.2,.32,8.2),white);slide.position.set(x-5.7,2.4,z+5.2);slide.rotation.x=-.42;group.add(slide);
-    [[-8.7,8.2],[-5.3,8.0]].forEach(([px,pz])=>{const horn=new THREE.Mesh(new THREE.ConeGeometry(.45,1.5,8),white);horn.position.set(x+px,7.9,z+pz*.02);horn.rotation.z=px< -7?-.35:.35;group.add(horn);});
-    for(const lx of [-2,4,9]){const leg=new THREE.Mesh(new THREE.BoxGeometry(.5,3.2,.5),red);leg.position.set(x+lx,1.6,z+1.6);leg.rotation.z=.18;group.add(leg);}
+    const tex=new THREE.CanvasTexture(c);tex.colorSpace=THREE.SRGBColorSpace;tex.wrapS=tex.wrapT=THREE.RepeatWrapping;tex.repeat.set(2.2,2.2);tex.minFilter=THREE.LinearMipmapLinearFilter;tex.magFilter=THREE.LinearFilter;
+    return new THREE.MeshStandardMaterial({map:tex,color:0xffffff,roughness:.84,metalness:0,side:THREE.DoubleSide});
+  }
+
+  function dragonProfileMesh(points,depth,material,x,z,y=0){
+    const shape=new THREE.Shape();shape.moveTo(points[0][0],points[0][1]);for(let i=1;i<points.length;i++)shape.lineTo(points[i][0],points[i][1]);shape.closePath();
+    const geo=new THREE.ExtrudeGeometry(shape,{depth,bevelEnabled:false,curveSegments:1,steps:1});
+    const mesh=new THREE.Mesh(geo,material);mesh.position.set(x,y,z-depth/2);mesh.castShadow=true;mesh.receiveShadow=true;return mesh;
+  }
+
+  function addDragonPlayground(group,x,z){
+    const whiteMosaic=makeMosaicMaterial('#e5e0d5','#c8c4bb',11);
+    const redMosaic=makeMosaicMaterial('#b94a32','#e8dfd1',23);
+    const blueMosaic=makeMosaicMaterial('#275d91','#ddd9cf',37);
+    const sand=new THREE.MeshStandardMaterial({color:0xd7c29a,roughness:1});
+    const grass=new THREE.MeshStandardMaterial({color:0x6f8865,roughness:1});
+    const steelWhite=new THREE.MeshStandardMaterial({color:0xe8e8e1,roughness:.52,metalness:.16});
+    const steelBlue=new THREE.MeshStandardMaterial({color:0x2874a5,roughness:.48,metalness:.18});
+    const steelRed=new THREE.MeshStandardMaterial({color:0xc94d42,roughness:.50,metalness:.16});
+    const steelGreen=new THREE.MeshStandardMaterial({color:0x4f9873,roughness:.52,metalness:.14});
+    const dark=new THREE.MeshStandardMaterial({color:0x3a4547,roughness:.55,metalness:.18});
+
+    const lawn=new THREE.Mesh(new THREE.BoxGeometry(34,.08,22),grass);lawn.position.set(x+1,.035,z);lawn.receiveShadow=true;group.add(lawn);
+    const pit=new THREE.Mesh(new THREE.BoxGeometry(30,.15,17.2),sand);pit.position.set(x+1,.13,z);pit.receiveShadow=true;group.add(pit);
+    const borderMat=makeMosaicMaterial('#4a7292','#e7e2d7',51);
+    [[30.5,.32,.48,x+1,z-8.72],[30.5,.32,.48,x+1,z+8.72],[.48,.32,17.0,x-14.25,z],[.48,.32,17.0,x+16.25,z]].forEach(([w,h,d,px,pz])=>{
+      const b=new THREE.Mesh(new THREE.BoxGeometry(w,h,d),borderMat);b.position.set(px,.23,pz);b.receiveShadow=true;group.add(b);
+    });
+
+    const headPts=[
+      [-5.8,1.0],[-4.4,2.05],[-5.25,3.20],[-4.0,3.95],[-4.85,5.25],
+      [-3.15,5.70],[-2.05,8.05],[-.55,6.55],[.65,8.25],[1.25,5.95],
+      [3.35,5.15],[2.10,3.85],[3.75,2.65],[1.55,2.00],[2.25,.25],
+      [.55,.78],[-.15,-1.15],[-1.18,.32],[-3.05,-.88],[-2.82,1.05],[-4.75,.35]
+    ];
+    const hx=x-6.25,hy=1.20;
+    group.add(dragonProfileMesh(headPts,2.25,whiteMosaic,hx,z,hy));
+    const cx=-.65,cy=3.55,innerPts=headPts.map(([px,py])=>[cx+(px-cx)*.84,cy+(py-cy)*.84]);
+    const redFaceShape=new THREE.Shape();redFaceShape.moveTo(innerPts[0][0],innerPts[0][1]);innerPts.slice(1).forEach(q=>redFaceShape.lineTo(q[0],q[1]));redFaceShape.closePath();
+    const faceGeo=new THREE.ShapeGeometry(redFaceShape);
+    for(const side of [-1,1]){
+      const face=new THREE.Mesh(faceGeo,redMosaic);face.position.set(hx,hy,z+side*1.145);group.add(face);
+      const eyeRim=new THREE.Mesh(new THREE.CylinderGeometry(.78,.78,.12,8),whiteMosaic);eyeRim.rotation.x=Math.PI/2;eyeRim.position.set(hx-.9,hy+4.55,z+side*1.24);group.add(eyeRim);
+      const eye=new THREE.Mesh(new THREE.CylinderGeometry(.43,.43,.13,8),dark);eye.rotation.x=Math.PI/2;eye.position.set(hx-.9,hy+4.55,z+side*1.32);group.add(eye);
+      const mouth=new THREE.Mesh(new THREE.BoxGeometry(2.55,.26,.10),whiteMosaic);mouth.position.set(hx-3.85,hy+2.02,z+side*1.27);mouth.rotation.z=.18;group.add(mouth);
+    }
+
+    const centres=[],ringMats=[steelBlue,steelRed,steelGreen,steelWhite,steelBlue,steelRed,steelGreen,steelWhite,steelBlue,steelRed,steelGreen,steelBlue];
+    for(let i=0;i<12;i++){
+      const t=i/11,px=x-1.3+t*13.6,pz=z+Math.sin(t*Math.PI)*1.35-.15,py=5.15+Math.sin(t*Math.PI)*.55;
+      centres.push(new THREE.Vector3(px,py,pz));
+    }
+    for(let i=0;i<centres.length;i++){
+      const prev=centres[Math.max(0,i-1)],next=centres[Math.min(centres.length-1,i+1)],tx=next.x-prev.x,tz=next.z-prev.z;
+      const ring=new THREE.Mesh(new THREE.TorusGeometry(1.85,.125,8,24),ringMats[i]);ring.rotation.y=Math.atan2(tx,tz);ring.position.copy(centres[i]);ring.castShadow=true;group.add(ring);
+    }
+    const railOffsets=[
+      {y:1.78,z:0,mat:steelWhite},{y:-1.72,z:0,mat:steelBlue},
+      {y:0,z:1.72,mat:steelRed},{y:0,z:-1.72,mat:steelGreen}
+    ];
+    for(const r of railOffsets){
+      const pts=centres.map(c=>new THREE.Vector3(c.x,c.y+r.y,c.z+r.z));
+      const curve=new THREE.CatmullRomCurve3(pts,false,'centripetal',.4);
+      const rail=new THREE.Mesh(new THREE.TubeGeometry(curve,36,.075,6,false),r.mat);rail.castShadow=true;group.add(rail);
+    }
+
+    [3,7,11].forEach((idx,si)=>{
+      const c=centres[idx],mat=si===1?whiteMosaic:blueMosaic;
+      for(const side of [-1,1]){
+        const leg=new THREE.Mesh(new THREE.CylinderGeometry(.42,.72,3.8,4),mat);
+        leg.position.set(c.x,c.y/2-.08,c.z+side*1.38);leg.rotation.y=Math.PI/4;leg.rotation.x=side*.12;leg.castShadow=true;group.add(leg);
+      }
+      const beam=new THREE.Mesh(new THREE.BoxGeometry(.7,.42,3.3),whiteMosaic);beam.position.set(c.x,c.y-1.74,c.z);group.add(beam);
+    });
+
+    const slide=new THREE.Mesh(new THREE.BoxGeometry(2.05,.20,7.1),whiteMosaic);slide.position.set(x-3.55,2.45,z+4.7);slide.rotation.x=-.48;slide.castShadow=true;group.add(slide);
+    for(const side of [-1,1]){
+      const rail=new THREE.Mesh(new THREE.BoxGeometry(.10,.24,7.15),steelBlue);rail.position.set(x-3.55+side*.94,2.65,z+4.7);rail.rotation.x=-.48;group.add(rail);
+    }
+
+    for(const bz of [-10.1,10.1]){
+      const path=new THREE.Mesh(new THREE.BoxGeometry(31,.06,1.2),shared.sidewalk);path.position.set(x+1,.08,z+bz);path.receiveShadow=true;group.add(path);
+    }
+    [[x-10.8,z-10.0],[x+11.3,z-10.0]].forEach(([px,pz],i)=>{
+      const trunk=new THREE.Mesh(new THREE.CylinderGeometry(.22,.30,3.2,7),shared.treeTrunk);trunk.position.set(px,1.6,pz);group.add(trunk);
+      const crown=new THREE.Mesh(new THREE.IcosahedronGeometry(2.45,1),i?shared.treeLeafLight:shared.treeLeaf);crown.position.set(px,5.1,pz);crown.scale.set(1.2,.92,1.1);group.add(crown);
+    });
+    for(const bx of [x-2.5,x+5.5]){
+      const seat=new THREE.Mesh(new THREE.BoxGeometry(2.6,.18,.55),dark);seat.position.set(bx,.65,z-10.5);group.add(seat);
+      for(const dx of [-.9,.9]){const leg=new THREE.Mesh(new THREE.BoxGeometry(.12,.62,.12),dark);leg.position.set(bx+dx,.34,z-10.5);group.add(leg);}
+    }
   }
 
   function addToaPayohTownPark(group,x,z){
